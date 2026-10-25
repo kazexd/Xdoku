@@ -4,7 +4,7 @@ import { beginStroke, cellAt, moveStroke } from '../src/game/drag.ts';
 
 const grid = { size: 5, width: 250, height: 250 };
 test('square board coordinates resolve every cell center across phone widths', /** 驗證測試情境：square board coordinates resolve every cell center across phone widths。 */ () => {
-  for (const size of [5, 6, 7]) for (const side of [266, 336, 376, 426]) {
+  for (const size of [7, 8, 9, 10]) for (const side of [266, 336, 376, 426]) {
     const bounds = { size, width: side, height: side };
     for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) {
       assert.equal(cellAt({ x: (col + .5) * side / size, y: (row + .5) * side / size }, bounds), row * size + col);
@@ -59,7 +59,7 @@ test('leaving and reentering the board marks only crossed cells inside its bound
   assert.deepEqual(stroke.marks.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (m, i) => m === 1 ? [i] : []), [0, 20, 21]);
 });
 test('hit testing respects all supported sizes and non-square measured bounds', /** 驗證測試情境：hit testing respects all supported sizes and non-square measured bounds。 */ () => {
-  for (const size of [5, 6, 7]) {
+  for (const size of [7, 8, 9, 10]) {
     const bounds = { size, width: 350, height: 420 };
     assert.equal(cellAt({ x: 349, y: 419 }, bounds), size * size - 1);
     assert.equal(cellAt({ x: 350, y: 10 }, bounds), null);

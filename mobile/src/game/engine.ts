@@ -1,9 +1,18 @@
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type Rating = { difficulty: Difficulty; singles: number; deductions: number; solved: boolean };
 export type Puzzle = { id: string; size: number; regions: number[]; solution: number[]; rating?: Rating };
-export const GENERATOR_VERSION = 2;
-export const BOARD_SIZES = [5, 6, 7] as const;
+export const GENERATOR_VERSION = 3;
+export const BOARD_SIZES = [7, 8, 9, 10] as const;
 export type Mark = 0 | 1 | 2; // empty, excluded, cat
+
+/** 將關卡或每日種子混合後均勻映射至四種尺寸，同一局重開時維持相同尺寸。 */
+export function boardSize(seed: number): typeof BOARD_SIZES[number] {
+  if (!Number.isSafeInteger(seed)) throw new RangeError('Seed must be a safe integer');
+  let value = seed >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 13), 0xc2b2ae35);
+  return BOARD_SIZES[(value ^ (value >>> 16)) >>> 0 & 3];
+}
 
 /** 判斷兩格是否同列、同欄、同色區或八方向相鄰，任一條件成立即衝突。 */
 export function conflicts(p: Puzzle, a: number, b: number) {
@@ -123,13 +132,15 @@ export function canonicalKey(p: Puzzle): string {
 
 // Seeded backtracking + connected region growth + uniqueness and logic checks.
 /** 由種子生成連通色區，只接受未被排除、唯一解且能以推理解完的棋盤；最多重試 5,000 次。 */
-export function makePuzzle(seed: number, size = 5, excluded: ReadonlySet<string> = new Set()): Puzzle {
-  if (!BOARD_SIZES.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ value => value === size)) throw new RangeError('Supported sizes: 5, 6, 7');
+export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set()): Puzzle {
+  if (!BOARD_SIZES.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ value => value === size)) throw new RangeError('Supported sizes: 7, 8, 9, 10');
   if (!Number.isSafeInteger(seed)) throw new RangeError('Seed must be a safe integer');
   let state = seed >>> 0;
   const random = /** 推進固定參數的 32 位元線性同餘亂數狀態，確保相同種子可重現生成結果。 */ () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
   for (let attempt = 0; attempt < 5000; attempt++) {
     const solution = randomSolution(size, random);
+    // 保留隨機的小色區作為推理起點，避免大型棋盤的均勻擴張產生大量多解候選。
+    const smallRegions = new Set(shuffled(Array.from({ length: size }, /** 建立可保留為小色區的編號。 */ (_, i) => i), random).slice(0, Math.floor(size / 2)));
     const regions = Array<number>(size * size).fill(-1);
     solution.forEach(/** 依序處理各項資料，更新目前轉換、色區或候選集合。 */ (cell, region) => { regions[cell] = region; });
     while (regions.includes(-1)) {
@@ -140,7 +151,9 @@ export function makePuzzle(seed: number, size = 5, excluded: ReadonlySet<string>
           if (neighbor >= 0 && neighbor < regions.length && regions[neighbor] === -1) edges.push([neighbor, region]);
         }
       });
-      const [cell, region] = edges[Math.floor(random() * edges.length)];
+      const expanding = edges.filter(/** 優先擴張非保留色區；若遇到被包圍的空格則允許所有色區擴張。 */ edge => !smallRegions.has(edge[1]));
+      const choices = expanding.length ? expanding : edges;
+      const [cell, region] = choices[Math.floor(random() * choices.length)];
       regions[cell] = region;
     }
     const puzzle: Puzzle = { id: `v${GENERATOR_VERSION}:${size}:${seed}`, size, regions, solution };
@@ -153,7 +166,7 @@ export function makePuzzle(seed: number, size = 5, excluded: ReadonlySet<string>
 
 const catalogs = new Map<number, { puzzles: Puzzle[]; keys: Set<string> }>();
 /** 依編號重建並快取指定尺寸的關卡庫，排除包含旋轉與鏡像的重複棋盤。 */
-export function levelPuzzle(level: number, size = 5): Puzzle {
+export function levelPuzzle(level: number, size = boardSize(level)): Puzzle {
   if (!Number.isSafeInteger(level) || level < 1) throw new RangeError('Level must be a positive integer');
   let catalog = catalogs.get(size);
   if (!catalog) { catalog = { puzzles: [], keys: new Set() }; catalogs.set(size, catalog); }

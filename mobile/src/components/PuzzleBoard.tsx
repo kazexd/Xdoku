@@ -3,7 +3,7 @@ import { Platform, StyleSheet, Text, View, type GestureResponderEvent, type View
 import { conflicts, type Mark, type Puzzle } from '../game/engine';
 import { beginStroke, cellAt, moveStroke, type Grid, type Stroke } from '../game/drag';
 
-const colors = ['#edc6ab', '#c9c9e9', '#bcd8be', '#f2de97', '#bad8e5', '#e4bcce', '#d3d7a6'];
+const colors = ['#edc6ab', '#c9c9e9', '#bcd8be', '#f2de97', '#bad8e5', '#e4bcce', '#d3d7a6', '#d9c5a6', '#c6c4dc', '#b9d8cc'];
 const BORDER = 3;
 type Props = {
   puzzle: Puzzle; marks: Mark[]; disabled: boolean;
@@ -71,7 +71,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
           backgroundColor: bad ? '#ef8b87' : colors[region],
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
-        <Text style={{ fontSize: puzzle.size === 7 ? 23 : 29, color: '#485448', userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
+        <Text style={{ fontSize: Math.min(23, 180 / puzzle.size), color: '#485448', userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
       </View>;
     })}
   </View>;

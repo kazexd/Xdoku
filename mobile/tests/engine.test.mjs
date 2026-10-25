@@ -1,6 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BOARD_SIZES, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed } from '../src/game/engine.ts';
+import { BOARD_SIZES, GENERATOR_VERSION, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed } from '../src/game/engine.ts';
+
+test('automatic size selection covers 7–10, stays stable and matches generated boards', /** 驗證自動選題涵蓋四種尺寸，重開不改變棋盤，每日尺寸亦不受時區影響。 */ () => {
+  const counts = new Map(BOARD_SIZES.map(/** 初始化各尺寸出現次數。 */ size => [size, 0]));
+  for (let seed = 1; seed <= 1000; seed++) {
+    const size = boardSize(seed);
+    assert.ok(BOARD_SIZES.includes(size));
+    assert.equal(size, boardSize(seed));
+    counts.set(size, counts.get(size) + 1);
+    if (seed <= 12) {
+      assert.equal(makePuzzle(seed).size, size);
+      assert.equal(levelPuzzle(seed).size, size);
+    }
+  }
+  for (const count of counts.values()) assert.ok(count > 180 && count < 320);
+  const date = dailySeed(new Date('2026-10-25T00:00:00Z'));
+  assert.deepEqual(makePuzzle(date), makePuzzle(dailySeed(new Date('2026-10-24T20:00:00-04:00'))));
+});
 
 test('100 seeds per size have a unique solution, connected regions and a deduction path', /** 驗證測試情境：100 seeds per size have a unique solution, connected regions and a deduction path。 */ () => {
   for (const size of BOARD_SIZES) {
@@ -38,7 +55,7 @@ test('answers vary beyond the old two fixed permutations', /** 驗證測試情�
 });
 
 test('canonical identity ignores relabeling, rotations and reflections', /** 驗證測試情境：canonical identity ignores relabeling, rotations and reflections。 */ () => {
-  const p = makePuzzle(1, 6);
+  const p = makePuzzle(1, 8);
   const identity = canonicalKey(p);
   for (let mirror = 0; mirror < 2; mirror++) for (let rotation = 0; rotation < 4; rotation++) {
     const regions = Array(p.regions.length);
@@ -72,7 +89,7 @@ test('classic catalog excludes repeats including symmetry and preserves determin
       assert.deepEqual(p, makePuzzle(level, size, keys));
       keys.add(canonicalKey(p));
     }
-    assert.equal(levelPuzzle(1, size).id, `v2:${size}:1`);
+    assert.equal(levelPuzzle(1, size).id, `v${GENERATOR_VERSION}:${size}:1`);
   }
 });
 
@@ -88,14 +105,14 @@ test('difficulty grades are based on deduction work', /** 驗證測試情境：d
 });
 
 test('invalid generator inputs fail explicitly', /** 驗證測試情境：invalid generator inputs fail explicitly。 */ () => {
-  for (const size of [0, 4, 8, 5.5]) assert.throws(/** 呼叫待驗證的函式，確認無效輸入會拋出預期錯誤。 */ () => makePuzzle(1, size), RangeError);
+  for (const size of [0, 4, 5, 6, 11, 7.5]) assert.throws(/** 呼叫待驗證的函式，確認無效輸入會拋出預期錯誤。 */ () => makePuzzle(1, size), RangeError);
   for (const seed of [NaN, Infinity, 1.5]) assert.throws(/** 呼叫待驗證的函式，確認無效輸入會拋出預期錯誤。 */ () => makePuzzle(seed), RangeError);
   assert.throws(/** 呼叫待驗證的函式，確認無效輸入會拋出預期錯誤。 */ () => levelPuzzle(0), RangeError);
 });
 test('row, column, region and diagonal conflicts are rejected', /** 驗證測試情境：row, column, region and diagonal conflicts are rejected。 */ () => {
   const p = makePuzzle(1);
   assert.ok(conflicts(p, 0, 4));
-  assert.ok(conflicts(p, 0, 20));
-  assert.ok(conflicts(p, 0, 6));
+  assert.ok(conflicts(p, 0, p.size * 2));
+  assert.ok(conflicts(p, 0, p.size + 1));
   assert.ok(!isComplete(p, Array(25).fill(2)));
 });

@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
-import { BOARD_SIZES, conflicts, dailySeed, isComplete, levelPuzzle, makePuzzle, type Mark } from '../game/engine';
+import { boardSize, conflicts, dailySeed, isComplete, levelPuzzle, makePuzzle, type Mark } from '../game/engine';
 import { resolveTap, type LastTap } from '../game/taps';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 
@@ -12,14 +12,15 @@ export default function Home() {
   const [boardInteracting, setBoardInteracting] = useState(false);
   const [mode, setMode] = useState<'classic' | 'daily'>('classic');
   const [level, setLevel] = useState(1);
-  const [size, setSize] = useState<number>(5);
+
   const [day, setDay] = useState(dailySeed());
+  const seed = mode === 'daily' ? day : level;
+  const size = boardSize(seed);
   const [marks, setMarks] = useState<Mark[]>(Array(size * size).fill(0));
   const [history, setHistory] = useState<Mark[][]>([]);
   const lastTap = useRef<LastTap | null>(null);
   const [loadedKey, setLoadedKey] = useState('');
   const [notice, setNotice] = useState('每列、每欄、每個色區各一隻貓；貓咪不能相鄰，包含對角線。');
-  const seed = mode === 'daily' ? day : level;
   const puzzle = useMemo(/** 依目前模式、種子與尺寸取得棋盤，僅在相關依賴改變時重新計算。 */ () => mode === 'daily' ? makePuzzle(seed, size) : levelPuzzle(level, size), [seed, size, mode, level]);
   const key = `xdoku:${mode}:${puzzle.id}`;
   const ready = loadedKey === key;
@@ -48,7 +49,6 @@ export default function Home() {
   return <SafeAreaView style={s.safe}><StatusBar style="dark" /><ScrollView scrollEnabled={!boardInteracting} contentContainerStyle={s.page}>
     <View style={s.top}><Text style={s.brand}>xdoku <Text style={s.paw}>✦</Text></Text><Text style={s.tag}>一格一格，慢慢想。</Text></View>
     <View style={s.switcher}>{(['classic', 'daily'] as const).map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ m => <Pressable accessibilityRole="button" key={m} onPress={/** 切換遊戲模式並重設載入與雙擊狀態，避免沿用另一模式的進度。 */ () => { if (m !== mode) { lastTap.current = null; setLoadedKey(''); setMode(m); } }} style={[s.tab, mode === m && s.selected]}><Text style={s.tabText}>{m === 'classic' ? '漫遊關卡' : '每日挑戰'}</Text></Pressable>)}</View>
-    <View style={s.tools}>{BOARD_SIZES.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: size === value }} onPress={/** 切換棋盤尺寸並等待對應進度載入，避免舊尺寸資料套用到新棋盤。 */ () => { if (value !== size) { lastTap.current = null; setLoadedKey(''); setSize(value); } }} style={[s.tab, size === value && s.selected]}><Text style={s.tabText}>{value} × {value}</Text></Pressable>)}</View>
     <Text style={s.eyebrow}>{mode === 'daily' ? `每日同題 · ${day} · UTC` : `小小花園 · 第 ${level} 關`}</Text>
     <Text style={s.title}>{complete ? '全都找到家了！' : '幫貓咪找個位置'}</Text>
     <Text style={s.subtitle}>{complete ? '做得好，享受這一刻的小小成就。' : `${size} × ${size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}     ${ready ? cats.length : 0} / ${size} 隻貓咪`}</Text>
