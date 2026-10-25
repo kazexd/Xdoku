@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
 import { conflicts, type Mark, type Puzzle } from '../game/engine';
 import { beginStroke, cellAt, moveStroke, type Grid, type Stroke } from '../game/drag';
+import { MARK_COLOR, regionColor } from '../game/palette';
 
-const colors = ['#edc6ab', '#c9c9e9', '#bcd8be', '#f2de97', '#bad8e5', '#e4bcce', '#d3d7a6', '#d9c5a6', '#c6c4dc', '#b9d8cc'];
 const BORDER = 3;
 type Props = {
   puzzle: Puzzle; marks: Mark[]; disabled: boolean;
@@ -58,7 +58,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
       const bad = visible[cell] === 2 && cats.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ other => other !== cell && conflicts(puzzle, cell, other));
       return <View key={cell} pointerEvents="none" accessible accessibilityRole="button"
         accessibilityState={{ disabled }}
-        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}`}
+        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}${bad ? '，位置衝突' : ''}`}
         accessibilityHint="可使用動作選單切換記號或貓咪"
         accessibilityActions={[{ name: 'mark', label: '切換記號' }, { name: 'cat', label: '切換貓咪' }]}
         onAccessibilityAction={/** 依螢幕閱讀器選擇切換記號或貓咪，並以一次可復原操作提交。 */ event => {
@@ -68,10 +68,11 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
         }}
         style={[styles.cell, { width: `${100 / puzzle.size}%`, height: `${100 / puzzle.size}%`,
           left: `${cell % puzzle.size * 100 / puzzle.size}%`, top: `${Math.floor(cell / puzzle.size) * 100 / puzzle.size}%`,
-          backgroundColor: bad ? '#ef8b87' : colors[region],
+          backgroundColor: regionColor(region),
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
-        <Text style={{ fontSize: Math.min(23, 180 / puzzle.size), color: '#485448', userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
+        <Text style={{ fontSize: Math.min(23, 180 / puzzle.size), color: MARK_COLOR, userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
+        {bad && <View accessible={false} style={styles.conflictRing}><Text style={styles.conflictBadge}>!</Text></View>}
       </View>;
     })}
   </View>;
@@ -80,4 +81,6 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
 const styles = StyleSheet.create({
   board: { width: '100%', aspectRatio: 1, position: 'relative', borderWidth: BORDER, borderColor: '#4d5749', borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? { touchAction: 'none' } as ViewStyle : {}) },
   cell: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderColor: '#58604e' },
+  conflictRing: { position: 'absolute', top: 2, right: 2, bottom: 2, left: 2, borderWidth: 2, borderColor: '#A51632', borderRadius: 4 },
+  conflictBadge: { position: 'absolute', top: -2, right: -2, width: 12, height: 12, textAlign: 'center', fontSize: 10, lineHeight: 12, fontWeight: '800', color: '#A51632', backgroundColor: '#FFFFFF', borderRadius: 6 },
 });
