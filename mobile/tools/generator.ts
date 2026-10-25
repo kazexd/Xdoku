@@ -1,10 +1,13 @@
 import { BOARD_SIZES, conflicts, type Rating, type Puzzle } from '../src/game/engine.ts';
 export * from '../src/game/engine.ts';
 
-export const GENERATOR_VERSION = 5;
+export const GENERATOR_VERSION = 6;
 
-/** 依面積向下取整至 14%；7×7 依指定例外允許每色七格。 */
-export function regionLimit(size: number): number { return size === 7 ? 7 : Math.floor(size * size * 14 / 100); }
+/** 表示此種子的搜尋預算用盡，建置工具可安全換下一個種子。 */
+export class GenerationExhaustedError extends Error {}
+
+/** 使用無預放貓的新硬上限，各比原提案增加兩格。 */
+export function regionLimit(size: number): number { return ({ 7: 11, 8: 13, 9: 15, 10: 17 } as Record<number, number>)[size]; }
 
 /** 將關卡或每日種子混合後均勻映射至四種尺寸，同一局重開時維持相同尺寸。 */
 export function boardSize(seed: number): typeof BOARD_SIZES[number] {
@@ -142,24 +145,11 @@ function connected(regions: number[], size: number, region: number): boolean {
   return seen.size === cells.length;
 }
 
-/** 優先不放線索，再檢查一隻及兩隻線索；只回傳唯一解且可推理解完的題目。 */
-function withClues(p: Puzzle, order: number[]): Puzzle | null {
-  const choices: number[][] = [[]];
-  for (const cell of order) choices.push([cell]);
-  for (let a = 0; a < order.length; a++) for (let b = a + 1; b < order.length; b++) choices.push([order[a], order[b]]);
-  for (const givens of choices) {
-    const candidate = { ...p, givens };
-    if (solve(candidate).length !== 1) continue;
-    const rating = ratePuzzle(candidate);
-    if (rating.solved) return { ...candidate, rating };
-  }
-  return null;
-}
-
-/** 先產生答案，再交換連通色區邊界；面積受限，必要時最多預放兩隻貓以確保唯一且可推理。 */
-export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set()): Puzzle {
+/** 先產生答案，再交換連通色區邊界；面積受限，不預放貓，只接受唯一解且可推理的題目。 */
+export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set(), attempts = 500): Puzzle {
   if (!BOARD_SIZES.some(/** 僅支援目前遊戲尺寸。 */ value => value === size)) throw new RangeError('Supported sizes: 7, 8, 9, 10');
   if (!Number.isSafeInteger(seed)) throw new RangeError('Seed must be a safe integer');
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 10000) throw new RangeError('Attempts must be 1–10000');
   let state = seed >>> 0;
   const random = /** 以固定參數推進種子，讓題目及線索可重現。 */ () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
   const solution = randomSolution(size, random);
@@ -167,15 +157,15 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
   const regions = Array.from({ length: size * size }, /** 起始每列一個連通色區，每區包含恰好一個答案。 */ (_, cell) => Math.floor(cell / size));
   const regionSizes = Array<number>(size).fill(size);
   const cap = regionLimit(size);
-  for (let attempt = 0; attempt < 500; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     for (let step = 0; step < size * size * 20; step++) {
       const a = Math.floor(random() * regions.length), b = Math.floor(random() * regions.length);
       const ra = regions[a], rb = regions[b];
       if (ra === rb || roots.has(a) || roots.has(b)) continue;
       if (!neighbors(a, size).some(/** 交換後必須與新色區相接。 */ cell => regions[cell] === rb) ||
           !neighbors(b, size).some(/** 另一格亦必須與新色區相接。 */ cell => regions[cell] === ra)) continue;
-      // 9×9、10×10 允許在上限內改變面積；7×7、8×8 以交換保持精確等面積。
-      const transfer = random() < .35 && regionSizes[rb] < cap && regionSizes[ra] > 2;
+      // 四種尺寸皆允許轉移；最多一區可縮至一格，仍須連通及不超上限。
+      const transfer = random() < .35 && regionSizes[rb] < cap && regionSizes[ra] > 1 && (regionSizes[ra] !== 2 || !regionSizes.includes(1));
       regions[a] = rb;
       if (!transfer) regions[b] = ra;
       if (!connected(regions, size, ra) || !connected(regions, size, rb)) {
@@ -183,12 +173,13 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
       }
       if (transfer) { regionSizes[ra]--; regionSizes[rb]++; }
     }
-    const puzzle: Puzzle = { id: `v${GENERATOR_VERSION}:${size}:${seed}`, size, regions: [...regions], solution };
+    const puzzle: Puzzle = { id: `v${GENERATOR_VERSION}:${size}:${seed}`, size, regions: [...regions], solution, givens: [] };
     if (excluded.has(canonicalKey(puzzle))) continue;
-    const result = withClues(puzzle, shuffled(solution, random));
-    if (result) return result;
+    if (solve(puzzle).length !== 1) continue;
+    const rating = ratePuzzle(puzzle);
+    if (rating.solved) return { ...puzzle, rating };
   }
-  throw new Error('Could not generate a bounded-area puzzle with at most two given cats');
+  throw new GenerationExhaustedError('No clue-free puzzle found within this seed budget');
 }
 
 const catalogs = new Map<number, { puzzles: Puzzle[]; keys: Set<string> }>();

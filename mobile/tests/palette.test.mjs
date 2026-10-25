@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { REGION_COLORS, MARK_COLOR, regionColor } from '../src/game/palette.ts';
-import { BOARD_SIZES, makePuzzle } from '../tools/generator.ts';
+import { BOARD_SIZES } from '../src/game/engine.ts';
+import bank from '../src/data/puzzles.json' with { type: 'json' };
 
 /** 將 sRGB 色碼轉為線性 RGB，供亮度及色差測試使用。 */
 function linearRGB(hex) {
@@ -43,7 +44,7 @@ test('dark exclusion marks remain readable against every region', /** 驗證每�
 
 test('each generated region maps to a distinct stable color for all board sizes', /** 驗證同區同色、不同區不同色，不會因尺寸變大而循環重用顏色。 */ () => {
   for (const size of BOARD_SIZES) {
-    const puzzle = makePuzzle(1, size);
+    const puzzle = [...bank.classic, ...bank.daily].find(/** 取現有題庫的指定尺寸。 */ p => p.size === size);
     const colors = new Set();
     for (let region = 0; region < size; region++) {
       assert.ok(puzzle.regions.includes(region));

@@ -18,11 +18,11 @@ Drag across the board to edit marks quickly. Starting on an empty cell fixes the
 
 Each region has a distinct color from a ten-color palette. Conflicts use a red outline and exclamation badge while retaining the region background. Palette tests guard pairwise CIELAB separation and mark contrast; color-vision accessibility still needs user testing.
 
-Every generated board has at most one single-cell region, and each region is capped at 14% of the board (rounded down). The agreed 7×7 exception allows seven cells: the caps for 7×7, 8×8, 9×9 and 10×10 are 7, 8, 11 and 14 cells.
+Generator v6 never preplaces cats. Hard region caps for 7×7, 8×8, 9×9 and 10×10 are 11, 13, 15 and 17 cells, with at most one singleton region. The existing v5 bank stays in place until a complete new bank is generated; the app supports both versions.
 
-The development-only generator in `mobile/tools/generator.ts` first fixes a valid cat solution, starts with one connected region per row, then exchanges boundary cells while preserving the solution, connectivity and area limits. Larger boards can also transfer boundary cells within the cap. It first checks the candidate without clues, then tries one and two given cats; only unique solutions completed by the deduction evaluator are accepted. It never adds more than two givens. Clues are part of the puzzle, not hint usage. Locked cats have a lock badge and cannot be changed by taps, drags, accessibility actions, restart or loading saved marks.
+The development generator fixes a legal answer, then exchanges or transfers region boundaries while preserving connectivity, area caps and one answer cat per region. It accepts only clue-free, unique, deductively solvable puzzles. Failed searches move to another seed without adding cats or relaxing caps.
 
-The deduction pass starts from the givens and uses singles and common conflict exclusions. Difficulty remains a heuristic based on group exclusions (0 easy, 1–3 medium, 4+ hard), pending player calibration. The build tool excludes rotated/reflected duplicates across both pools. It validates uniqueness, connectivity, region caps and deductions before publishing data. Generation tries at most 500 mutation batches per candidate; none of this generation or search code is imported by the app.
+Deduction uses singles and common conflict exclusions. Difficulty is a heuristic based on group exclusions (0 easy, 1–3 medium, 4+ hard). The builder excludes rotations, reflections and region relabelings. The app imports no generation or search code.
 
 Content-derived puzzle IDs keep classic saves attached to the same puzzle. Daily save keys also include the UTC date, so yearly repeats start fresh. Earlier saves remain on the device but are not applied to new layouts. Before release: add explanatory hints, localization, non-color region cues, original assets and device testing, including startup performance on older iPhones.
 
@@ -34,6 +34,6 @@ Chinese version: [Traditional Chinese](README.zh.md).
 
 ## Prebuild puzzle data
 
-In `mobile`, run `npm.cmd run puzzles:generate` on Windows (or `npm run puzzles:generate` elsewhere). Optional arguments: `-- --classic 200 --daily 365 --seed 100000`. This deterministic development command writes `src/data/puzzles.json` atomically, preserving the old file on failure. Commit the resulting JSON with the app. No backend, credentials, or generation process is needed on the player device.
+In `mobile`, run `npm.cmd run puzzles:generate -- --classic 200 --daily 365 --seed 100000 --max-seeds 20000 --attempts 500`. Each seed searches up to 500 batches, with 20,000 seeds in total. A fixed seed selects each target size; failures cannot substitute another size. Progress and `.puzzle-generation/checkpoint.json` are saved after every seed. Rerun the same command to resume; increase `--max-seeds` after exhaustion. Other settings must match, or use `--checkpoint <new-path>` for a separate run. Finding 10×10 puzzles is difficult; the budget may not fill the bank. Only a complete validated bank replaces `src/data/puzzles.json`; interruption or failure preserves existing data. Commit the generated JSON when complete.
 
 Treat shipped ordering as release data: keep existing classic entries and daily ordering stable when editing the bank. Changing a daily pool length/order changes its date mapping; plan such changes as a new schedule. The current finite daily pool repeats every 365 days. Older procedural puzzle saves remain on the device but are not mapped onto the new bank.
