@@ -6,7 +6,7 @@ export type Round = { marks: Mark[]; fish: number; mistakes: number[] };
 /** 檢查新增貓咪是否屬於答案；錯誤轉為排除記號並每次扣一條魚。 */
 export function applyMove(puzzle: Puzzle, round: Round, next: Mark[]): { round: Round; wrong: number | null } {
   if (round.fish === 0) return { round, wrong: null };
-  const protectedMarks = next.map(/** 已選錯的格子永久保留排除記號。 */ (mark, cell) => round.mistakes.includes(cell) ? 1 as const : mark);
+  const protectedMarks = next.map(/** 保護已選錯的記號及已找到的正確貓咪。 */ (mark, cell) => round.mistakes.includes(cell) ? 1 as const : round.marks[cell] === 2 && puzzle.solution.includes(cell) ? 2 as const : mark);
   const wrong = protectedMarks.findIndex(/** 只有新放下的錯誤貓需要扣機會。 */ (mark, cell) => mark === 2 && round.marks[cell] !== 2 && !puzzle.solution.includes(cell));
   if (wrong < 0) return { round: { marks: protectGivens(puzzle, protectedMarks), fish: round.fish, mistakes: round.mistakes }, wrong: null };
   // 一次操作只處理一隻新貓，避免批次輸入繞過逐次錯誤回饋。

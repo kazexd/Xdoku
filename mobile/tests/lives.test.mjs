@@ -49,3 +49,18 @@ test('mistakes lock X against taps, cat placement and drag erasure and survive s
   const corrupt = restoreRound(p, { ...round, mistakes: [-1, 9999, p.solution[0], wrong, wrong] });
   assert.deepEqual(corrupt.mistakes, [wrong]);
 });
+
+
+test('correct cats remain locked against all edits and after reloading', /** 驗證已找到及提示揭示的貓不可被移除，重新開始才清除。 */ () => {
+  const cell = p.solution[0], round = move(fresh(), cell, 2).round;
+  for (const mark of [0, 1, 2]) {
+    const result = move(round, cell, mark);
+    assert.equal(result.round.marks[cell], 2); assert.equal(result.round.fish, 3); assert.equal(result.wrong, null);
+  }
+  const restored = restoreRound(p, JSON.parse(JSON.stringify(round)));
+  assert.equal(move(restored, cell, 0).round.marks[cell], 2);
+  const next = [...round.marks]; next[cell] = 0; next[p.solution[1]] = 1;
+  const edited = applyMove(p, round, next).round;
+  assert.equal(edited.marks[cell], 2); assert.equal(edited.marks[p.solution[1]], 1);
+  assert.equal(fresh().marks[cell], 0);
+});

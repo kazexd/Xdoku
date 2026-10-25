@@ -69,7 +69,7 @@ export default function Home() {
   /** 依點擊時間判定單擊／雙擊，更新指定格子，讓第二下正確取代第一下的記號。 */
   function tapCell(cell: number, time: number) {
     if (blocked || inputLock.current) return;
-    if (mistakes.includes(cell) || puzzle.givens?.includes(cell)) { lastTap.current = null; return; }
+    if (mistakes.includes(cell) || (marks[cell] === 2 && puzzle.solution.includes(cell)) || puzzle.givens?.includes(cell)) { lastTap.current = null; return; }
     const result = resolveTap(marks[cell], cell, time, key, lastTap.current);
     change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i) => i === cell ? result.mark : mark));
     lastTap.current = result.mark === 2 ? null : result.lastTap;
