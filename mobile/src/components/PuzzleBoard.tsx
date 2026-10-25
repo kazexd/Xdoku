@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
-import { conflicts, type Mark, type Puzzle } from '../game/engine';
+import { conflicts, protectGivens, type Mark, type Puzzle } from '../game/engine';
 import { beginStroke, cellAt, moveStroke, type Grid, type Stroke } from '../game/drag';
 import { MARK_COLOR, regionColor } from '../game/palette';
 
@@ -37,7 +37,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
       if (cell !== null) onTap(cell, event.nativeEvent.timestamp);
     }
   }
-  const visible = preview ?? marks;
+  const visible = protectGivens(puzzle, preview ?? marks);
   const cats = visible.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (mark, i) => mark === 2 ? [i] : []);
   return <View style={styles.board} onLayout={/** 記錄扣除外框後的棋盤尺寸，使拖曳座標與實際格子對齊。 */ ({ nativeEvent: { layout } }) => {
     grid.current = { size: puzzle.size, width: layout.width - BORDER * 2, height: layout.height - BORDER * 2 };
@@ -55,14 +55,15 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
   }} onResponderRelease={/** 最後一次更新路徑並結束手勢；仍有其他手指接觸時視為取消。 */ event => finish(event.nativeEvent.touches.length > 0, event)}
     onResponderTerminationRequest={/** 手勢進行期間保留觸控控制權，避免頁面捲動搶走拖曳。 */ () => false} onResponderTerminate={/** 系統中斷手勢時捨棄預覽並恢復頁面捲動。 */ () => finish(true)}>
     {puzzle.regions.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (region, cell) => {
+      const given = puzzle.givens?.includes(cell) ?? false;
       const bad = visible[cell] === 2 && cats.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ other => other !== cell && conflicts(puzzle, cell, other));
       return <View key={cell} pointerEvents="none" accessible accessibilityRole="button"
-        accessibilityState={{ disabled }}
-        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}${bad ? '，位置衝突' : ''}`}
-        accessibilityHint="可使用動作選單切換記號或貓咪"
+        accessibilityState={{ disabled: disabled || given }}
+        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}${given ? '，固定線索' : ''}${bad ? '，位置衝突' : ''}`}
+        accessibilityHint={given ? '題目預放的固定貓咪，不能修改' : '可使用動作選單切換記號或貓咪'}
         accessibilityActions={[{ name: 'mark', label: '切換記號' }, { name: 'cat', label: '切換貓咪' }]}
         onAccessibilityAction={/** 依螢幕閱讀器選擇切換記號或貓咪，並以一次可復原操作提交。 */ event => {
-          if (disabled) return;
+          if (disabled || given) return;
           const next = marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i): Mark => i !== cell ? mark : event.nativeEvent.actionName === 'cat' ? mark === 2 ? 0 : 2 : mark === 1 ? 0 : mark === 2 ? 2 : 1);
           onStroke(next);
         }}
@@ -72,6 +73,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
         <Text style={{ fontSize: Math.min(23, 180 / puzzle.size), color: MARK_COLOR, userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
+        {given && <Text accessible={false} style={styles.givenBadge}>🔒</Text>}
         {bad && <View accessible={false} style={styles.conflictRing}><Text style={styles.conflictBadge}>!</Text></View>}
       </View>;
     })}
@@ -81,6 +83,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
 const styles = StyleSheet.create({
   board: { width: '100%', aspectRatio: 1, position: 'relative', borderWidth: BORDER, borderColor: '#4d5749', borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? { touchAction: 'none' } as ViewStyle : {}) },
   cell: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderColor: '#58604e' },
+  givenBadge: { position: 'absolute', top: 1, left: 1, fontSize: 9 },
   conflictRing: { position: 'absolute', top: 2, right: 2, bottom: 2, left: 2, borderWidth: 2, borderColor: '#A51632', borderRadius: 4 },
   conflictBadge: { position: 'absolute', top: -2, right: -2, width: 12, height: 12, textAlign: 'center', fontSize: 10, lineHeight: 12, fontWeight: '800', color: '#A51632', backgroundColor: '#FFFFFF', borderRadius: 6 },
 });
