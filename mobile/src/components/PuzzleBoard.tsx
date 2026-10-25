@@ -63,7 +63,9 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
           const next = marks.map((mark, i): Mark => i !== cell ? mark : event.nativeEvent.actionName === 'cat' ? mark === 2 ? 0 : 2 : mark === 1 ? 0 : mark === 2 ? 2 : 1);
           onStroke(next);
         }}
-        style={[styles.cell, { width: `${100 / puzzle.size}%`, backgroundColor: bad ? '#ef8b87' : colors[region],
+        style={[styles.cell, { width: `${100 / puzzle.size}%`, height: `${100 / puzzle.size}%`,
+          left: `${cell % puzzle.size * 100 / puzzle.size}%`, top: `${Math.floor(cell / puzzle.size) * 100 / puzzle.size}%`,
+          backgroundColor: bad ? '#ef8b87' : colors[region],
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
         <Text style={{ fontSize: puzzle.size === 7 ? 23 : 29, color: '#485448', userSelect: 'none' }}>{visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
@@ -73,6 +75,6 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
 }
 
 const styles = StyleSheet.create({
-  board: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: BORDER, borderColor: '#4d5749', borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? { touchAction: 'none' } as ViewStyle : {}) },
-  cell: { aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderColor: '#58604e' },
+  board: { width: '100%', aspectRatio: 1, position: 'relative', borderWidth: BORDER, borderColor: '#4d5749', borderRadius: 12, overflow: 'hidden', ...(Platform.OS === 'web' ? { touchAction: 'none' } as ViewStyle : {}) },
+  cell: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderColor: '#58604e' },
 });

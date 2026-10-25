@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import { beginStroke, cellAt, moveStroke } from '../src/game/drag.ts';
 
 const grid = { size: 5, width: 250, height: 250 };
+test('square board coordinates resolve every cell center across phone widths', () => {
+  for (const size of [5, 6, 7]) for (const side of [266, 336, 376, 426]) {
+    const bounds = { size, width: side, height: side };
+    for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) {
+      assert.equal(cellAt({ x: (col + .5) * side / size, y: (row + .5) * side / size }, bounds), row * size + col);
+    }
+  }
+});
 test('starting on an empty cell adds marks across a fast drag, including the starting cell', () => {
   const original = Array(25).fill(0);
   const start = beginStroke(original, { x: 25, y: 25 }, grid);
