@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { REGION_COLORS, MARK_COLOR, regionColor } from '../src/game/palette.ts';
-import { BOARD_SIZES, makePuzzle } from '../src/game/engine.ts';
+import { BOARD_SIZES, makePuzzle } from '../tools/generator.ts';
 
 /** 將 sRGB 色碼轉為線性 RGB，供亮度及色差測試使用。 */
 function linearRGB(hex) {

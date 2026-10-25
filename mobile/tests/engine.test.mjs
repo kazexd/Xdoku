@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BOARD_SIZES, GENERATOR_VERSION, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed, regionLimit, protectGivens } from '../src/game/engine.ts';
+import { BOARD_SIZES, GENERATOR_VERSION, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed, regionLimit, protectGivens } from '../tools/generator.ts';
 
 test('a new classic round has a different puzzle and starts with only its own clues', /** 驗證開新一局會更換棋盤並使用新題目的線索，不會繼承舊局記號或影響每日題目。 */ () => {
   const daily = makePuzzle(dailySeed(new Date('2026-10-25T00:00:00Z')));

@@ -30,7 +30,8 @@
     "web": "expo start --web",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "puzzles:generate": "node --experimental-strip-types tools/build-puzzles.mjs"
   },
   "private": true
 }
