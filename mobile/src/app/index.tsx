@@ -5,9 +5,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { BOARD_SIZES, conflicts, dailySeed, isComplete, levelPuzzle, makePuzzle, type Mark } from '../game/engine';
 import { resolveTap, type LastTap } from '../game/taps';
+import { PuzzleBoard } from '../components/PuzzleBoard';
 
-const colors = ['#edc6ab', '#c9c9e9', '#bcd8be', '#f2de97', '#bad8e5', '#e4bcce', '#d3d7a6'];
 export default function Home() {
+  const [boardInteracting, setBoardInteracting] = useState(false);
   const [mode, setMode] = useState<'classic' | 'daily'>('classic');
   const [level, setLevel] = useState(1);
   const [size, setSize] = useState<number>(5);
@@ -41,18 +42,15 @@ export default function Home() {
     setMarks(marks.map((mark, i) => i === cell ? result.mark : mark));
   }
   const cats = marks.flatMap((m, i) => m === 2 ? [i] : []);
-  return <SafeAreaView style={s.safe}><StatusBar style="dark" /><ScrollView contentContainerStyle={s.page}>
+  return <SafeAreaView style={s.safe}><StatusBar style="dark" /><ScrollView scrollEnabled={!boardInteracting} contentContainerStyle={s.page}>
     <View style={s.top}><Text style={s.brand}>xdoku <Text style={s.paw}>✦</Text></Text><Text style={s.tag}>一格一格，慢慢想。</Text></View>
     <View style={s.switcher}>{(['classic', 'daily'] as const).map(m => <Pressable accessibilityRole="button" key={m} onPress={() => { if (m !== mode) { lastTap.current = null; setLoadedKey(''); setMode(m); } }} style={[s.tab, mode === m && s.selected]}><Text style={s.tabText}>{m === 'classic' ? '漫遊關卡' : '每日挑戰'}</Text></Pressable>)}</View>
     <View style={s.tools}>{BOARD_SIZES.map(value => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: size === value }} onPress={() => { if (value !== size) { lastTap.current = null; setLoadedKey(''); setSize(value); } }} style={[s.tab, size === value && s.selected]}><Text style={s.tabText}>{value} × {value}</Text></Pressable>)}</View>
     <Text style={s.eyebrow}>{mode === 'daily' ? `每日同題 · ${day} · UTC` : `小小花園 · 第 ${level} 關`}</Text>
     <Text style={s.title}>{complete ? '全都找到家了！' : '幫貓咪找個位置'}</Text>
     <Text style={s.subtitle}>{complete ? '做得好，享受這一刻的小小成就。' : `${size} × ${size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}     ${ready ? cats.length : 0} / ${size} 隻貓咪`}</Text>
-    <View style={s.board}>{puzzle.regions.map((region, i) => {
-      const bad = marks[i] === 2 && cats.some(other => i !== other && conflicts(puzzle, i, other));
-      return <Pressable key={i} disabled={!ready || complete} accessibilityRole="button" accessibilityHint="點一下切換記號，連按兩下切換貓咪" accessibilityLabel={`第 ${Math.floor(i / size) + 1} 列第 ${i % size + 1} 欄，區域 ${region + 1}，${marks[i] === 2 ? '貓咪' : marks[i] === 1 ? '已排除' : '空白'}`} onPress={event => tapCell(i, event.nativeEvent.timestamp)} style={[s.cell, { width: `${100 / size}%`, backgroundColor: colors[region], borderRightWidth: i % size === size - 1 || puzzle.regions[i + 1] !== region ? 3 : .5, borderBottomWidth: i >= size * (size - 1) || puzzle.regions[i + size] !== region ? 3 : .5 }, bad && s.bad]}><Text style={[s.symbol, { fontSize: size === 7 ? 23 : 29 }]}>{marks[i] === 2 ? '🐱' : marks[i] === 1 ? '×' : ''}</Text></Pressable>;
-    })}</View>
-    <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱</Text>
+    <PuzzleBoard key={key} puzzle={puzzle} marks={marks} disabled={!ready || complete} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={() => { lastTap.current = null; }} />
+    <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。</Text>
     <View style={s.tools}><Pressable disabled={!history.length || !ready} onPress={() => { lastTap.current = null; setMarks(history[history.length - 1]); setHistory(h => h.slice(0, -1)); }} style={s.action}><Text>↶ 復原</Text></Pressable><Pressable disabled={!ready || complete} onPress={() => { const cell = puzzle.solution.find(i => marks[i] !== 2); if (cell !== undefined) { change(marks.map((m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready} onPress={() => change(Array(size * size).fill(0))} style={s.action}><Text>重新開始</Text></Pressable></View>
     {complete && mode === 'classic' && <Pressable style={s.next} onPress={() => { lastTap.current = null; setLoadedKey(''); setLevel(v => v + 1); }}><Text style={s.nextText}>下一個小花園 →</Text></Pressable>}
     <View style={s.card}><Text style={s.cardTitle}>遊玩小筆記</Text><Text style={s.note}>{notice}</Text></View>
