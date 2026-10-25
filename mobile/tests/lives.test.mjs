@@ -19,8 +19,8 @@ test('only incorrect new cats consume fish; wrong cells become X', /** 檢查正
 
 test('third mistake ends the round and further moves are ignored', /** 驗證三次機會及終局鎖定。 */ () => {
   let round = fresh();
-  const wrong = p.regions.findIndex(/** 選取非答案格。 */ (_, cell) => !p.solution.includes(cell));
-  for (let i = 2; i >= 0; i--) { round = move(round, wrong, 2).round; assert.equal(round.fish, i); }
+  const wrong = p.regions.flatMap(/** 選取三個不同錯誤格。 */ (_, cell) => !p.solution.includes(cell) ? [cell] : []);
+  for (let i = 2; i >= 0; i--) { round = move(round, wrong[i], 2).round; assert.equal(round.fish, i); }
   assert.deepEqual(move(round, p.solution[0], 2), { round, wrong: null });
   assert.equal(fresh().fish, 3);
 });
@@ -32,4 +32,20 @@ test('saved fish persist including game over; legacy and corrupt saves are repai
   assert.equal(restoreRound(p, old).marks[wrong], 1);
   assert.equal(restoreRound(p, old).fish, 3);
   for (const invalid of [null, [], { marks: [99], fish: 0 }]) assert.deepEqual(restoreRound(p, invalid), round);
+});
+
+
+test('mistakes lock X against taps, cat placement and drag erasure and survive saves', /** 驗證錯誤鎖定不能被操作或存檔覆蓋。 */ () => {
+  const wrong = p.regions.findIndex(/** 取得錯誤格。 */ (_, cell) => !p.solution.includes(cell));
+  const round = move(fresh(), wrong, 2).round;
+  assert.deepEqual(round.mistakes, [wrong]);
+  for (const mark of [0, 1, 2]) {
+    const result = move(round, wrong, mark);
+    assert.equal(result.round.marks[wrong], 1); assert.equal(result.round.fish, 2); assert.equal(result.wrong, null);
+  }
+  const saved = JSON.parse(JSON.stringify(round)); saved.marks[wrong] = 0;
+  assert.deepEqual(restoreRound(p, saved), round);
+  assert.deepEqual(fresh().mistakes, []);
+  const corrupt = restoreRound(p, { ...round, mistakes: [-1, 9999, p.solution[0], wrong, wrong] });
+  assert.deepEqual(corrupt.mistakes, [wrong]);
 });

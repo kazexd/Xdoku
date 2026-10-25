@@ -19,6 +19,7 @@ export default function Home() {
   const puzzle = mode === 'daily' ? dailyPuzzle(day) : classicPuzzle(level);
   const size = puzzle.size;
   const [marks, setMarks] = useState<Mark[]>(Array(size * size).fill(0));
+  const [mistakes, setMistakes] = useState<number[]>([]);
   const [fish, setFish] = useState(MAX_FISH);
   const [feedback, setFeedback] = useState<{ key: string; cell: number; red: boolean } | null>(null);
   const inputLock = useRef(false);
@@ -45,30 +46,30 @@ export default function Home() {
     let active = true;
     AsyncStorage.getItem(key).then(/** 忽略已失效的載入結果，套用尺寸與記號值皆合法的存檔。 */ raw => {
       if (!active) return;
-      setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setFeedback(null);
+      setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setFeedback(null);
       if (freshKey.current === key) { freshKey.current = null; return; }
-      if (raw) { const saved = restoreRound(puzzle, JSON.parse(raw)); setMarks(saved.marks); setFish(saved.fish); }
-    }).catch(/** 載入失敗時清空棋盤，並顯示重新開始的訊息。 */ () => { if (active) { if (freshKey.current === key) freshKey.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setFeedback(null); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
+      if (raw) { const saved = restoreRound(puzzle, JSON.parse(raw)); setMarks(saved.marks); setFish(saved.fish); setMistakes(saved.mistakes); }
+    }).catch(/** 載入失敗時清空棋盤，並顯示重新開始的訊息。 */ () => { if (active) { if (freshKey.current === key) freshKey.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setFeedback(null); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
     return /** 標記本次載入已失效，避免離開棋盤後仍套用非同步結果。 */ () => { active = false; };
   }, [key, size, puzzle]);
-  useEffect(/** 只在目前棋盤完成載入後儲存記號；儲存失敗時提供使用者回饋。 */ () => { if (ready) AsyncStorage.setItem(key, JSON.stringify({ marks, fish })).catch(/** 儲存失敗時顯示訊息，讓使用者知道進度可能未寫入。 */ () => setNotice('進度儲存失敗，請確認裝置儲存空間。')); }, [key, marks, fish, ready]);
+  useEffect(/** 只在目前棋盤完成載入後儲存記號；儲存失敗時提供使用者回饋。 */ () => { if (ready) AsyncStorage.setItem(key, JSON.stringify({ marks, fish, mistakes })).catch(/** 儲存失敗時顯示訊息，讓使用者知道進度可能未寫入。 */ () => setNotice('進度儲存失敗，請確認裝置儲存空間。')); }, [key, marks, fish, mistakes, ready]);
   /** 提交棋盤變更並清除雙擊狀態，同時保護預放線索。 */
   function change(next: Mark[]) {
     if (blocked || inputLock.current) return;
     lastTap.current = null;
-    const result = applyMove(puzzle, { marks, fish }, next);
-    setMarks(result.round.marks); setFish(result.round.fish);
+    const result = applyMove(puzzle, { marks, fish, mistakes }, next);
+    setMarks(result.round.marks); setFish(result.round.fish); setMistakes(result.round.mistakes);
     if (result.wrong !== null) {
       inputLock.current = true; setFeedback({ key, cell: result.wrong, red: false });
       setNotice('這格沒有貓咪，扣一條魚。');
     }
   }
   /** 明確重新開始同題並恢復三條魚。 */
-  function restart() { if (animating || !ready) return; lastTap.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setNotice('重新開始，三條魚已補滿。'); }
+  function restart() { if (animating || !ready) return; lastTap.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setNotice('重新開始，三條魚已補滿。'); }
   /** 依點擊時間判定單擊／雙擊，更新指定格子，讓第二下正確取代第一下的記號。 */
   function tapCell(cell: number, time: number) {
     if (blocked || inputLock.current) return;
-    if (puzzle.givens?.includes(cell)) { lastTap.current = null; return; }
+    if (mistakes.includes(cell) || puzzle.givens?.includes(cell)) { lastTap.current = null; return; }
     const result = resolveTap(marks[cell], cell, time, key, lastTap.current);
     change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i) => i === cell ? result.mark : mark));
     lastTap.current = result.mark === 2 ? null : result.lastTap;
@@ -93,7 +94,7 @@ export default function Home() {
     <Text style={s.title}>{complete ? '全都找到家了！' : '幫貓咪找個位置'}</Text>
     <Text style={s.subtitle}>{complete ? '做得好，享受這一刻的小小成就。' : `${size} × ${size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}     ${ready ? cats.length : 0} / ${size} 隻貓咪`}</Text>
     <Text accessibilityLabel={`剩餘 ${ready ? fish : MAX_FISH} 次機會`} style={s.fish}>{Array.from({ length: MAX_FISH }, /** 顯示剩餘與已消耗的魚。 */ (_, i) => <Text key={i} style={{ opacity: i < fish ? 1 : .2 }}>🐟 </Text>)}</Text>
-    <PuzzleBoard key={key} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />
+    <PuzzleBoard key={key} lockedCells={mistakes} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />
     {(puzzle.givens?.length ?? 0) > 0 && <Text style={s.gestureHint}>🔒 為題目預放線索，不能移除，也不計作使用提示。</Text>}
     <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。</Text>
     <View style={s.tools}><Pressable accessibilityRole="button" disabled={!ready || boardInteracting || level >= CLASSIC_COUNT} onPress={startNewGame} style={s.action}><Text>{level >= CLASSIC_COUNT ? '題庫已用完' : '開新一局'}</Text></Pressable><Pressable disabled={blocked} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready || animating || gameOver} onPress={restart} style={s.action}><Text>重新開始</Text></Pressable></View>

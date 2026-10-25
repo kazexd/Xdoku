@@ -40,3 +40,5 @@ Treat shipped ordering as release data: keep existing classic entries and daily 
 
 
 Each round starts with three fish (🐟). Placing a cat outside the stored solution shows a cat, flashes dark red, then leaves an X and consumes one fish. Input pauses during feedback. Fish persist with saved progress; zero fish shows Game Over with a New game action. Restart explicitly resets the same puzzle and all three fish. Marks and hints cost no fish. At the end of the classic bank, Game Over offers a retry of the current puzzle.
+
+Wrong guesses are locked as X for the rest of the round. Taps, drag marking and accessibility actions cannot change them. Locked cells persist in saved progress and clear on restart or a new game. Existing saves without mistake history cannot recover previously wrong cells.

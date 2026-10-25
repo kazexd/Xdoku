@@ -6,7 +6,7 @@ import { MARK_COLOR, regionColor } from '../game/palette';
 
 const BORDER = 3;
 type Props = {
-  puzzle: Puzzle; marks: Mark[]; disabled: boolean; errorCell?: number; errorRed?: boolean;
+  puzzle: Puzzle; marks: Mark[]; disabled: boolean; lockedCells?: number[]; errorCell?: number; errorRed?: boolean;
   onTap: (cell: number, time: number) => void;
   onStroke: (marks: Mark[]) => void;
   onInteraction: (active: boolean) => void;
@@ -14,7 +14,7 @@ type Props = {
 };
 
 /** 繪製正方形棋盤，管理點擊、拖曳預覽、取消與輔助動作；完成拖曳才向上層提交變更。 */
-export function PuzzleBoard({ puzzle, marks, disabled, errorCell, errorRed, onTap, onStroke, onInteraction, onDragStart }: Props) {
+export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCell, errorRed, onTap, onStroke, onInteraction, onDragStart }: Props) {
   const grid = useRef<Grid>({ size: puzzle.size, width: 0, height: 0 });
   const stroke = useRef<Stroke | null>(null);
   const [preview, setPreview] = useState<Mark[] | null>(null);
@@ -37,12 +37,14 @@ export function PuzzleBoard({ puzzle, marks, disabled, errorCell, errorRed, onTa
       if (cell !== null) onTap(cell, event.nativeEvent.timestamp);
     }
   }
-  const visible = protectGivens(puzzle, preview ?? marks);
+  const visible = protectGivens(puzzle, (preview ?? marks).map(/** 拖曳預覽亦不可擦除已選錯的格子。 */ (mark, cell) => lockedCells.includes(cell) ? 1 : mark));
   const cats = visible.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (mark, i) => mark === 2 ? [i] : []);
   return <View style={styles.board} onLayout={/** 記錄扣除外框後的棋盤尺寸，使拖曳座標與實際格子對齊。 */ ({ nativeEvent: { layout } }) => {
     grid.current = { size: puzzle.size, width: layout.width - BORDER * 2, height: layout.height - BORDER * 2 };
   }} onStartShouldSetResponder={/** 僅在棋盤可操作時接管觸控，讓棋盤處理完整手勢。 */ () => !disabled} onResponderGrant={/** 由單指起點建立筆畫快照，並暫停外層頁面的捲動。 */ event => {
     if (disabled || event.nativeEvent.touches.length !== 1) return;
+    const startCell = cellAt(point(event), grid.current);
+    if (startCell !== null && lockedCells.includes(startCell)) return;
     stroke.current = beginStroke(marks, point(event), grid.current);
     if (stroke.current) onInteraction(true);
   }} onResponderMove={/** 更新拖曳預覽；多指時取消，首次進入拖曳時清除雙擊狀態。 */ event => {
@@ -56,14 +58,15 @@ export function PuzzleBoard({ puzzle, marks, disabled, errorCell, errorRed, onTa
     onResponderTerminationRequest={/** 手勢進行期間保留觸控控制權，避免頁面捲動搶走拖曳。 */ () => false} onResponderTerminate={/** 系統中斷手勢時捨棄預覽並恢復頁面捲動。 */ () => finish(true)}>
     {puzzle.regions.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (region, cell) => {
       const given = puzzle.givens?.includes(cell) ?? false;
+      const locked = lockedCells.includes(cell);
       const bad = visible[cell] === 2 && cats.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ other => other !== cell && conflicts(puzzle, cell, other));
       return <View key={cell} pointerEvents="none" accessible accessibilityRole="button"
-        accessibilityState={{ disabled: disabled || given }}
-        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}${errorCell === cell ? '，選錯位置' : ''}${given ? '，固定線索' : ''}${bad ? '，位置衝突' : ''}`}
-        accessibilityHint={given ? '題目預放的固定貓咪，不能修改' : '可使用動作選單切換記號或貓咪'}
+        accessibilityState={{ disabled: disabled || given || locked }}
+        accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}${errorCell === cell ? '，選錯位置' : ''}${locked ? '，已選錯，不能修改' : ''}${given ? '，固定線索' : ''}${bad ? '，位置衝突' : ''}`}
+        accessibilityHint={locked ? '已選錯的位置，固定為排除記號' : given ? '題目預放的固定貓咪，不能修改' : '可使用動作選單切換記號或貓咪'}
         accessibilityActions={[{ name: 'mark', label: '切換記號' }, { name: 'cat', label: '切換貓咪' }]}
         onAccessibilityAction={/** 依螢幕閱讀器選擇切換記號或貓咪，並以一次可復原操作提交。 */ event => {
-          if (disabled || given) return;
+          if (disabled || given || locked) return;
           const next = marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i): Mark => i !== cell ? mark : event.nativeEvent.actionName === 'cat' ? mark === 2 ? 0 : 2 : mark === 1 ? 0 : mark === 2 ? 2 : 1);
           onStroke(next);
         }}
