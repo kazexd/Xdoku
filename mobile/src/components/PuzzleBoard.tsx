@@ -26,6 +26,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCe
     animation.start();
     return /** 停止舊題目的彈跳動畫。 */ () => animation.stop();
   }, [celebrateCell, bounce]);
+  const [side, setSide] = useState(0);
   const grid = useRef<Grid>({ size: puzzle.size, width: 0, height: 0 });
   const stroke = useRef<Stroke | null>(null);
   const [preview, setPreview] = useState<Mark[] | null>(null);
@@ -50,7 +51,8 @@ export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCe
   }
   const visible = protectGivens(puzzle, (preview ?? marks).map(/** 拖曳預覽亦不可擦除已選錯的格子。 */ (mark, cell) => lockedCells.includes(cell) ? 1 : mark));
   const cats = visible.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (mark, i) => mark === 2 ? [i] : []);
-  return <View style={styles.board} onLayout={/** 記錄扣除外框後的棋盤尺寸，使拖曳座標與實際格子對齊。 */ ({ nativeEvent: { layout } }) => {
+  return <View testID="puzzle-board" style={styles.board} onLayout={/** 記錄扣除外框後的棋盤尺寸，使拖曳座標與實際格子對齊。 */ ({ nativeEvent: { layout } }) => {
+    setSide(layout.width);
     grid.current = { size: puzzle.size, width: layout.width - BORDER * 2, height: layout.height - BORDER * 2 };
   }} onStartShouldSetResponder={/** 僅在棋盤可操作時接管觸控，讓棋盤處理完整手勢。 */ () => !disabled} onResponderGrant={/** 由單指起點建立筆畫快照，並暫停外層頁面的捲動。 */ event => {
     if (disabled || event.nativeEvent.touches.length !== 1) return;
@@ -87,7 +89,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCe
           backgroundColor: errorCell === cell && errorRed ? '#791F2B' : regionColor(region),
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
-        <Animated.Text style={{ transform: [{ translateY: cell === celebrateCell ? bounce : 0 }], fontSize: Math.min(23, 180 / puzzle.size), color: MARK_COLOR, userSelect: 'none' }}>{errorCell === cell || visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Animated.Text>
+        <Animated.Text allowFontScaling={false} style={{ transform: [{ translateY: cell === celebrateCell ? bounce : 0 }], fontSize: Math.min(28, Math.max(1, (side - BORDER * 2) / puzzle.size * .6)), color: MARK_COLOR, userSelect: 'none' }}>{errorCell === cell || visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Animated.Text>
         {given && <Text accessible={false} style={styles.givenBadge}>🔒</Text>}
         {bad && <View accessible={false} style={styles.conflictRing}><Text style={styles.conflictBadge}>!</Text></View>}
       </View>;

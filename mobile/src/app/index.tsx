@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
@@ -9,11 +9,16 @@ import { applyMove, restoreRound, MAX_FISH } from '../game/lives';
 import { newlyFoundCat } from '../game/sound';
 import { useCorrectSound } from '../game/useCorrectSound';
 import { resolveTap, type LastTap } from '../game/taps';
+import { screenLayout } from '../game/layout';
+import { FitDialog } from '../components/FitDialog';
 import { Confetti } from '../components/Confetti';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 
 /** 管理關卡、尺寸、每日更新、本機存檔，組合遊戲主畫面與棋盤互動。 */
 export default function Home() {
+  const [bounds, setBounds] = useState({ width: 0, height: 0 });
+  const [headerHeight, setHeaderHeight] = useState(0), [footerHeight, setFooterHeight] = useState(0);
+  const layout = screenLayout(bounds.width, bounds.height, headerHeight, footerHeight);
   const playCorrectSound = useCorrectSound();
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [boardInteracting, setBoardInteracting] = useState(false);
@@ -102,49 +107,52 @@ export default function Home() {
     setLevel(nextLevel);
     setNotice('每列、每欄、每個色區各一隻貓；貓咪不能相鄰，包含對角線。');
   }
-  const cats = marks.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (m, i) => m === 2 ? [i] : []);
-  return <SafeAreaView style={s.safe}><StatusBar style="dark" /><ScrollView scrollEnabled={!boardInteracting} contentContainerStyle={s.page}>
-    <View style={s.top}><View><Text style={s.brand}>xdoku <Text style={s.paw}>✦</Text></Text><Text style={s.tag}>一格一格，慢慢想。</Text></View><Pressable accessibilityRole="button" accessibilityLabel="開啟選項" accessibilityState={{ expanded: optionsOpen }} onPress={/** 開啟遊玩說明與後續功能資訊。 */ () => { lastTap.current = null; setOptionsOpen(true); }} style={s.optionsButton}><Text style={s.optionsIcon}>⚙</Text></Pressable></View>
-    <View style={s.switcher}>{(['classic', 'daily'] as const).map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ m => <Pressable accessibilityRole="button" key={m} onPress={/** 切換遊戲模式並重設載入與雙擊狀態，避免沿用另一模式的進度。 */ () => { if (m !== mode) { lastTap.current = null; setLoadedKey(''); setMode(m); } }} style={[s.tab, mode === m && s.selected]}><Text style={s.tabText}>{m === 'classic' ? '漫遊關卡' : '每日挑戰'}</Text></Pressable>)}</View>
-    <Text style={s.eyebrow}>{mode === 'daily' ? `每日同題 · ${day} · UTC` : `小小花園 · 第 ${level} 關`}</Text>
-    <Text style={s.title}>{complete ? '全都找到家了！' : '幫貓咪找個位置'}</Text>
-    <Text style={s.subtitle}>{complete ? '做得好，享受這一刻的小小成就。' : `${size} × ${size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}     ${ready ? cats.length : 0} / ${size} 隻貓咪`}</Text>
-    <Text accessibilityLabel={`剩餘 ${ready ? fish : MAX_FISH} 次機會`} style={s.fish}>{Array.from({ length: MAX_FISH }, /** 顯示剩餘與已消耗的魚。 */ (_, i) => <Text key={i} style={{ opacity: i < fish ? 1 : .2 }}>🐟 </Text>)}</Text>
-    <View style={{ position: 'relative' }}><PuzzleBoard key={key} celebrateCell={complete ? lastCat : undefined} lockedCells={mistakes} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />{complete && celebratedKey !== key && <Confetti key={key} />}</View>
-    {(puzzle.givens?.length ?? 0) > 0 && <Text style={s.gestureHint}>🔒 為題目預放線索，不能移除，也不計作使用提示。</Text>}
-    <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。</Text>
-    <View style={s.tools}><Pressable accessibilityRole="button" disabled={!ready || boardInteracting || level >= CLASSIC_COUNT} onPress={startNewGame} style={s.action}><Text>{level >= CLASSIC_COUNT ? '題庫已用完' : '開新一局'}</Text></Pressable><Pressable disabled={blocked} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setUsedHint(true); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready || animating || gameOver} onPress={restart} style={s.action}><Text>重新開始</Text></Pressable></View>
-  </ScrollView><Modal visible={gameOver} transparent animationType="fade" onRequestClose={/** 機會用盡後保留結束畫面。 */ () => {}}>
-    <View style={s.overlay}><View accessibilityViewIsModal style={s.dialog}><Text style={s.title}>Game Over</Text><Text style={s.note}>三條魚已用完，再挑戰一局吧。</Text><Pressable accessibilityRole="button" onPress={level < CLASSIC_COUNT ? startNewGame : restart} style={s.next}><Text style={s.nextText}>{level < CLASSIC_COUNT ? '開新一局' : '重新挑戰本關'}</Text></Pressable></View></View>
-  </Modal><Modal visible={complete && celebratedKey === key && dismissedKey !== key} transparent animationType="fade" onRequestClose={/** 由玩家明確選擇下一步。 */ () => {}}>
-    <View style={s.overlay}><View accessibilityViewIsModal style={s.dialog}>
-      <Text style={s.title}>喵～全部找到了！🎉</Text>
-      <Text style={s.note}>{mode === 'daily' ? '每日挑戰完成，貓咪都找到家了。' : level === CLASSIC_COUNT ? '所有關卡已完成！' : `第 ${level} 關完成，貓咪都找到家了。`}</Text>
-      <Text accessibilityLabel={`過關剩餘 ${fish} 條魚`} style={s.resultFish}>剩餘機會 {'🐟'.repeat(fish)}</Text>
-      {usedHint && <Text style={s.note}>本關使用了提示</Text>}
-      <Pressable accessibilityRole="button" style={s.next} onPress={/** 保留成果直到玩家繼續，每日完成後回到漫遊模式。 */ () => {
-        if (level < CLASSIC_COUNT) startNewGame();
-        else if (mode === 'daily') { lastTap.current = null; setLoadedKey(''); setMode('classic'); }
-        else setDismissedKey(key);
-      }}><Text style={s.nextText}>{mode === 'daily' ? '繼續漫遊關卡' : level === CLASSIC_COUNT ? '查看完成棋盤' : '下一關 →'}</Text></Pressable>
-    </View></View>
-  </Modal><Modal visible={optionsOpen} transparent animationType="fade" onRequestClose={/** 支援系統返回關閉選項。 */ () => setOptionsOpen(false)}>
-    <View style={s.overlay}><View accessibilityViewIsModal style={[s.dialog, s.optionsDialog]}>
-      <View style={s.optionsHeader}><Text accessibilityRole="header" style={s.optionsTitle}>選項</Text><Pressable accessibilityRole="button" accessibilityLabel="關閉選項" onPress={/** 關閉資訊面板並回到原棋盤。 */ () => setOptionsOpen(false)} style={s.optionsButton}><Text style={s.optionsClose}>×</Text></Pressable></View>
-      <ScrollView><View style={s.card}><Text accessibilityRole="header" style={s.cardTitle}>遊玩小筆記</Text><Text style={s.note}>{notice}</Text></View>
-      <View style={s.footer}><Text accessibilityRole="header" style={s.cardTitle}>接下來的旅程</Text><Text style={s.note}>排行榜與商店尚未開通。目前內建 {CLASSIC_COUNT} 個一般關卡，可離線遊玩並儲存進度。</Text></View></ScrollView>
-    </View></View>
-  </Modal></SafeAreaView>;
+  /** 揭示一隻正確貓咪，保留提示紀錄與現有機會。 */
+  function reveal() {
+    if (blocked) return;
+    const cell = puzzle.solution.find(/** 取得第一隻尚未找到的貓咪。 */ i => marks[i] !== 2);
+    if (cell === undefined) return;
+    change(marks.map(/** 新增提示貓並移除衝突的貓咪。 */ (mark, i) => i === cell ? 2 : mark === 2 && conflicts(puzzle, i, cell) ? 0 : mark));
+    setUsedHint(true); setNotice('已揭示一隻貓的位置；本局使用了提示。');
+  }
+  /** 保留成果直到玩家繼續，每日挑戰完成後回到漫遊模式。 */
+  function continueGame() {
+    if (level < CLASSIC_COUNT) startNewGame();
+    else if (mode === 'daily') { lastTap.current = null; setLoadedKey(''); setMode('classic'); }
+    else setDismissedKey(key);
+  }
+  const cats = marks.filter(/** 統計已找到的貓咪。 */ mark => mark === 2).length;
+  const optionsSections = [
+    { title: '遊玩操作', text: '點一下做記號 ×，連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。已找到的正確貓咪與選錯後的 X 都會鎖定，不能修改；重新開始或開新一局才會清除。' },
+    { title: '規則與機會', text: '每列、每欄、每個色區各一隻貓；貓咪不能相鄰，包含對角線。每局三條魚，放錯貓會扣一條；用完後顯示 Game Over。提示不扣魚，但會記錄使用提示。重新開始會重設同題及三條魚。🔒 為題目固定線索，不能移除，也不計作提示。' },
+    { title: '遊玩小筆記', text: notice },
+    { title: '接下來的旅程', text: `排行榜與商店尚未開通。目前內建 ${CLASSIC_COUNT} 個一般關卡，可離線遊玩並儲存進度。` },
+  ];
+  return <SafeAreaView style={s.safe}><StatusBar style="dark" />
+    <View testID="game-screen" style={[s.page, { padding: layout.padding, gap: layout.gap }]} onLayout={/** 量度安全區內實際可用空間，不再次扣除瀏海或底部。 */ ({ nativeEvent: { layout: measured } }) => setBounds({ width: measured.width, height: measured.height })}>
+      <View style={[s.header, { gap: layout.gap }]} onLayout={/** 固定資訊可隨字體換行，再將剩餘高度交給棋盤。 */ ({ nativeEvent: { layout: measured } }) => setHeaderHeight(measured.height)}>
+        <View style={s.top}><Text style={s.brand}>xdoku <Text style={s.paw}>✦</Text></Text><Pressable accessibilityRole="button" accessibilityLabel="開啟選項" accessibilityState={{ expanded: optionsOpen }} disabled={boardInteracting} onPress={/** 每次開啟選項都由第一頁開始。 */ () => { lastTap.current = null; setOptionsOpen(true); }} style={s.optionsButton}><Text style={s.optionsIcon}>⚙</Text></Pressable></View>
+        <View style={s.switcher}>{(['classic', 'daily'] as const).map(/** 切換模式並載入各自儲存的進度。 */ nextMode => <Pressable accessibilityRole="button" key={nextMode} disabled={boardInteracting} onPress={/** 清除雙擊及舊載入狀態。 */ () => { if (nextMode !== mode) { lastTap.current = null; setLoadedKey(''); setMode(nextMode); } }} style={[s.tab, mode === nextMode && s.selected]}><Text style={s.tabText}>{nextMode === 'classic' ? '漫遊關卡' : '每日挑戰'}</Text></Pressable>)}</View>
+        <View style={s.infoRow}><Text style={s.info}>{mode === 'daily' ? `每日 · ${day} UTC` : `第 ${level} 關`} · {size}×{size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}</Text><Text accessibilityLabel={`已找到 ${ready ? cats : 0} 隻，共 ${size} 隻貓咪`} style={s.info}>🐱 {ready ? cats : 0}/{size}</Text></View>
+        <Text accessibilityLabel={`剩餘 ${ready ? fish : MAX_FISH} 次機會`} style={s.fish}>{Array.from({ length: MAX_FISH }, /** 已消耗的魚保留淡色位置。 */ (_, i) => <Text key={i} style={{ opacity: i < fish ? 1 : .2 }}>🐟 </Text>)}</Text>
+      </View>
+      <View style={s.arena}><View testID="board-frame" style={{ width: layout.board, height: layout.board, position: 'relative' }}><PuzzleBoard key={key} celebrateCell={complete ? lastCat : undefined} lockedCells={mistakes} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked || optionsOpen} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時取消雙擊判斷。 */ () => { lastTap.current = null; }} />{complete && celebratedKey !== key && <Confetti key={key} />}</View></View>
+      <View style={s.tools} onLayout={/** 保留完整操作按鈕高度，包含系統放大的字體。 */ ({ nativeEvent: { layout: measured } }) => setFooterHeight(measured.height)}>
+        <Pressable accessibilityRole="button" disabled={!ready || boardInteracting || level >= CLASSIC_COUNT} onPress={startNewGame} style={s.action}><Text style={s.actionText}>{level >= CLASSIC_COUNT ? '題庫已用完' : '開新一局'}</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={blocked || boardInteracting} onPress={reveal} style={s.action}><Text style={s.actionText}>揭示一格</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={!ready || animating || gameOver || boardInteracting} onPress={restart} style={s.action}><Text style={s.actionText}>重新開始</Text></Pressable>
+      </View>
+    </View>
+    {gameOver && <FitDialog title="Game Over" sections={[{ title: '三條魚已用完', text: '再挑戰一局吧。' }]} action={level < CLASSIC_COUNT ? '開新一局' : '重新挑戰本關'} onAction={level < CLASSIC_COUNT ? startNewGame : restart} />}
+    {complete && celebratedKey === key && dismissedKey !== key && <FitDialog title="喵～全部找到了！🎉" sections={[{ title: mode === 'daily' ? '每日挑戰完成' : level === CLASSIC_COUNT ? '所有關卡已完成！' : `第 ${level} 關完成`, text: `貓咪都找到家了。\n剩餘機會 ${'🐟'.repeat(fish)}${usedHint ? '\n本關使用了提示' : ''}` }]} action={mode === 'daily' ? '繼續漫遊關卡' : level === CLASSIC_COUNT ? '查看完成棋盤' : '下一關 →'} onAction={continueGame} />}
+    {optionsOpen && <FitDialog title="選項" sections={optionsSections} onClose={/** 關閉選項後回到同一局。 */ () => setOptionsOpen(false)} />}
+  </SafeAreaView>;
 }
 const s = StyleSheet.create({
-  optionsButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: '#eeeee3' },
-  optionsIcon: { fontSize: 26, color: '#435641' }, optionsClose: { fontSize: 28, color: '#435641' },
-  optionsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  optionsTitle: { fontSize: 22, fontWeight: '700', color: '#293d34' }, optionsDialog: { maxHeight: '80%' },
-  resultFish: { fontSize: 20, marginTop: 18, color: '#435641' },
-  fish: { fontSize: 26, textAlign: 'center', marginBottom: 16 },
-  overlay: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 28 },
-  dialog: { backgroundColor: '#faf7f0', borderRadius: 20, padding: 28, width: '100%', maxWidth: 380 },
-  gestureHint: { marginTop: 18, textAlign: 'center', color: '#435641', fontSize: 13 },
-  safe: { flex: 1, backgroundColor: '#faf7f0' }, page: { padding: 24, paddingBottom: 40, width: '100%', maxWidth: 480, alignSelf: 'center' }, top: { marginBottom: 28, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, brand: { fontSize: 30, fontWeight: '800', color: '#293d34', letterSpacing: -1 }, paw: { color: '#b57954' }, tag: { marginTop: 6, color: '#788175', fontSize: 13 }, switcher: { flexDirection: 'row', backgroundColor: '#ecece2', padding: 5, borderRadius: 16 }, tab: { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' }, selected: { backgroundColor: '#fffdf8' }, tabText: { color: '#344b3d', fontWeight: '600' }, eyebrow: { marginTop: 30, color: '#8a785e', fontSize: 12, letterSpacing: 1 }, title: { marginTop: 8, color: '#293d34', fontSize: 27, fontWeight: '700' }, subtitle: { color: '#7b8074', marginTop: 10, marginBottom: 24, fontSize: 13 }, board: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: 3, borderColor: '#4d5749', borderRadius: 12, overflow: 'hidden' }, cell: { width: '20%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderColor: '#58604e' }, bad: { backgroundColor: '#ef8b87' }, symbol: { fontSize: 29, color: '#485448' }, tools: { flexDirection: 'row', gap: 10, marginTop: 18 }, tool: { flex: 1, alignItems: 'center', padding: 15, borderRadius: 14, backgroundColor: '#eaeade' }, activeTool: { backgroundColor: '#cddcc6', borderWidth: 1, borderColor: '#769369' }, toolText: { fontWeight: '600', color: '#2e4836' }, action: { flex: 1, alignItems: 'center', paddingVertical: 14, backgroundColor: '#f0ede5', borderRadius: 12 }, card: { marginTop: 25, padding: 20, backgroundColor: '#eeeee3', borderRadius: 18 }, cardTitle: { fontSize: 14, fontWeight: '700', color: '#435641', marginBottom: 8 }, note: { color: '#737969', fontSize: 13, lineHeight: 22 }, footer: { marginTop: 24 }, next: { backgroundColor: '#354e3e', padding: 18, borderRadius: 14, marginTop: 20, alignItems: 'center' }, nextText: { color: 'white', fontWeight: '700' },
+  safe: { flex: 1, backgroundColor: '#faf7f0' }, page: { flex: 1, width: '100%', maxWidth: 480, alignSelf: 'center' }, header: { flexShrink: 0 },
+  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }, brand: { flexShrink: 1, fontSize: 26, fontWeight: '800', color: '#293d34' }, paw: { color: '#b57954' },
+  optionsButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', padding: 4, borderRadius: 14, backgroundColor: '#eeeee3' }, optionsIcon: { fontSize: 26, color: '#435641' },
+  switcher: { flexDirection: 'row', backgroundColor: '#ecece2', padding: 4, borderRadius: 14 }, tab: { flex: 1, minHeight: 44, padding: 6, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, selected: { backgroundColor: '#fffdf8' }, tabText: { fontSize: 14, color: '#344b3d', fontWeight: '600', textAlign: 'center' },
+  infoRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 8, rowGap: 2 }, info: { fontSize: 13, color: '#53634e', flexShrink: 1 }, fish: { fontSize: 22, textAlign: 'center' },
+  arena: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }, tools: { flexDirection: 'row', gap: 6, flexShrink: 0 }, action: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', padding: 6, backgroundColor: '#f0ede5', borderRadius: 12 }, actionText: { fontSize: 13, color: '#344b3d', textAlign: 'center' },
 });
