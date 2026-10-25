@@ -24,6 +24,10 @@ test('100 seeds per size have a unique solution, connected regions and a deducti
   for (let seed = 1; seed <= 100; seed++) {
     const p = makePuzzle(seed, size);
     assert.deepEqual(solve(p), [p.solution]);
+    const regionSizes = Array(size).fill(0);
+    for (const region of p.regions) regionSizes[region]++;
+    assert.ok(regionSizes.every(/** 每一個色區都必須存在。 */ count => count >= 1));
+    assert.ok(regionSizes.filter(/** 統計單格色區以驗證新增生成限制。 */ count => count === 1).length <= 1, `${size}×${size}, seed ${seed}: ${regionSizes}`);
     assert.equal(p.rating.solved, true);
     assert.equal(p.rating.singles, size);
     assert.deepEqual(p.rating, ratePuzzle({ ...p, solution: [] }));
@@ -74,6 +78,9 @@ test('an excluded candidate is regenerated instead of being returned', /** 驗�
     const first = makePuzzle(17, size);
     const excluded = new Set([canonicalKey(first)]);
     const replacement = makePuzzle(17, size, excluded);
+    const regionSizes = Array(size).fill(0);
+    for (const region of replacement.regions) regionSizes[region]++;
+    assert.ok(regionSizes.filter(/** 重新生成的候選亦須符合最多一個單格色區的限制。 */ count => count === 1).length <= 1);
     assert.ok(!excluded.has(canonicalKey(replacement)));
     assert.deepEqual(solve(replacement), [replacement.solution]);
     assert.equal(replacement.rating.solved, true);

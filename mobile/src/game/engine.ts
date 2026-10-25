@@ -1,7 +1,7 @@
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type Rating = { difficulty: Difficulty; singles: number; deductions: number; solved: boolean };
 export type Puzzle = { id: string; size: number; regions: number[]; solution: number[]; rating?: Rating };
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 export const BOARD_SIZES = [7, 8, 9, 10] as const;
 export type Mark = 0 | 1 | 2; // empty, excluded, cat
 
@@ -131,7 +131,7 @@ export function canonicalKey(p: Puzzle): string {
 }
 
 // Seeded backtracking + connected region growth + uniqueness and logic checks.
-/** 由種子生成連通色區，只接受未被排除、唯一解且能以推理解完的棋盤；最多重試 5,000 次。 */
+/** 由種子生成連通色區，最多一個單格色區；只接受未重複、唯一解且可推理解完的棋盤。 */
 export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set()): Puzzle {
   if (!BOARD_SIZES.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ value => value === size)) throw new RangeError('Supported sizes: 7, 8, 9, 10');
   if (!Number.isSafeInteger(seed)) throw new RangeError('Seed must be a safe integer');
@@ -140,7 +140,10 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
   for (let attempt = 0; attempt < 5000; attempt++) {
     const solution = randomSolution(size, random);
     // 保留隨機的小色區作為推理起點，避免大型棋盤的均勻擴張產生大量多解候選。
-    const smallRegions = new Set(shuffled(Array.from({ length: size }, /** 建立可保留為小色區的編號。 */ (_, i) => i), random).slice(0, Math.floor(size / 2)));
+    const smallRegions = new Set(shuffled(Array.from({ length: size }, /** 建立可保留為小色區的編號。 */ (_, i) => i), random).slice(0, size - 2));
+    const singletonRegion = Math.floor(random() * size);
+    smallRegions.add(singletonRegion);
+    const regionSizes = Array<number>(size).fill(1);
     const regions = Array<number>(size * size).fill(-1);
     solution.forEach(/** 依序處理各項資料，更新目前轉換、色區或候選集合。 */ (cell, region) => { regions[cell] = region; });
     while (regions.includes(-1)) {
@@ -151,11 +154,15 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
           if (neighbor >= 0 && neighbor < regions.length && regions[neighbor] === -1) edges.push([neighbor, region]);
         }
       });
-      const expanding = edges.filter(/** 優先擴張非保留色區；若遇到被包圍的空格則允許所有色區擴張。 */ edge => !smallRegions.has(edge[1]));
-      const choices = expanding.length ? expanding : edges;
+      // 先讓其餘色區至少長至兩格，再保留小色區作為推理起點。
+      const undersized = edges.filter(/** 優先擴張尚未達到兩格且不是唯一允許單格的色區。 */ edge => edge[1] !== singletonRegion && regionSizes[edge[1]] < 2);
+      const expanding = edges.filter(/** 其餘階段優先擴張非保留色區；被包圍時允許小色區繼續擴張。 */ edge => !smallRegions.has(edge[1]));
+      const choices = undersized.length ? undersized : expanding.length ? expanding : edges;
       const [cell, region] = choices[Math.floor(random() * choices.length)];
       regions[cell] = region;
+      regionSizes[region]++;
     }
+    if (regionSizes.filter(/** 計算單格色區，防止被包圍而無法擴張的色區繞過限制。 */ count => count === 1).length > 1) continue;
     const puzzle: Puzzle = { id: `v${GENERATOR_VERSION}:${size}:${seed}`, size, regions, solution };
     if (excluded.has(canonicalKey(puzzle)) || solve(puzzle).length !== 1) continue;
     const rating = ratePuzzle(puzzle);
