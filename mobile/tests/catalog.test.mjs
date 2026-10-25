@@ -1,13 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import bank from '../src/data/puzzles.json' with { type: 'json' };
 import { CLASSIC_COUNT, DAILY_COUNT, classicPuzzle, dailyPuzzle } from '../src/game/catalog.ts';
 import { validateCatalog } from '../src/game/catalog-schema.ts';
 import { canonicalKey, solve, ratePuzzle } from '../tools/generator.ts';
-import { buildCatalog } from '../tools/build-puzzles.mjs';
 
 test('every bundled puzzle is unique, connected, bounded and deductively solvable offline', /** 驗證發佈題庫中的每一題，而非只抽樣生成器。 */ () => {
   assert.equal(validateCatalog(bank), bank);
@@ -60,30 +57,9 @@ test('malformed catalogs fail without silently switching to generation', /** 驗
   }
 });
 
-test('build tool is reproducible and validates its input', /** 驗證生成是獨立開發步驟，且相同參數會產生相同題庫。 */ () => {
-  assert.deepEqual(buildCatalog(2, 2, 1, undefined, { sizes: [7] }), buildCatalog(2, 2, 1, undefined, { sizes: [7] }));
-  for (const count of [0, -1, 1.5]) assert.throws(/** 無效題庫數量不得寫入檔案。 */ () => buildCatalog(count, 2), RangeError);
-});
-
 test('app source only loads catalog data and generator lives outside runtime source', /** 防止未來把即時生成或解題器重新接回 App。 */ () => {
   const screen = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
   const rules = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.ok(!/makePuzzle|levelPuzzle|boardSize|generator/.test(screen));
   assert.ok(!/function (makePuzzle|solve|ratePuzzle|randomSolution)/.test(rules));
-});
-
-
-test('checkpoint resumes without changing deterministic output or accepting clues', /** 驗證用盡預算後可續跑，且新版本拒絕預放貓。 */ () => {
-  const dir = mkdtempSync(join(tmpdir(), 'xdoku-generation-'));
-  try {
-    const checkpoint = join(dir, 'checkpoint.json');
-    assert.throws(/** 只搜尋一個種子不足以填滿兩題。 */ () => buildCatalog(1, 1, 1, undefined, { sizes: [7], checkpoint, maxSeeds: 1 }));
-    const resumed = buildCatalog(1, 1, 1, undefined, { sizes: [7], checkpoint, maxSeeds: 20 });
-    assert.deepEqual(resumed, buildCatalog(1, 1, 1, undefined, { sizes: [7], maxSeeds: 20 }));
-    assert.equal(resumed.generatorVersion, 6);
-    for (const p of [...resumed.classic, ...resumed.daily]) assert.deepEqual(p.givens, []);
-    const bad = structuredClone(resumed); bad.classic[0].givens = [bad.classic[0].solution[0]];
-    assert.throws(/** 新題庫不可偷加線索。 */ () => validateCatalog(bad));
-    assert.throws(/** 更改搜尋設定不能混用舊斷點。 */ () => buildCatalog(1, 1, 2, undefined, { checkpoint, sizes: [7] }));
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

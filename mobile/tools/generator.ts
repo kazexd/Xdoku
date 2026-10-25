@@ -1,13 +1,16 @@
 import { BOARD_SIZES, conflicts, type Rating, type Puzzle } from '../src/game/engine.ts';
 export * from '../src/game/engine.ts';
 
-export const GENERATOR_VERSION = 6;
+export const GENERATOR_VERSION = 7;
 
 /** 表示此種子的搜尋預算用盡，建置工具可安全換下一個種子。 */
 export class GenerationExhaustedError extends Error {}
 
-/** 使用無預放貓的新硬上限，各比原提案增加兩格。 */
-export function regionLimit(size: number): number { return ({ 7: 11, 8: 13, 9: 15, 10: 17 } as Record<number, number>)[size]; }
+/** 普通色區上限為行數的 200%。 */
+export function regionLimit(size: number): number { return size * 2; }
+
+/** 普通色區下限為行數的 50%，向上取整。 */
+export function regionMinimum(size: number): number { return Math.ceil(size / 2); }
 
 /** 將關卡或每日種子混合後均勻映射至四種尺寸，同一局重開時維持相同尺寸。 */
 export function boardSize(seed: number): typeof BOARD_SIZES[number] {
@@ -146,14 +149,17 @@ function connected(regions: number[], size: number, region: number): boolean {
 }
 
 /** 先產生答案，再交換連通色區邊界；面積受限，不預放貓，只接受唯一解且可推理的題目。 */
-export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set(), attempts = 500): Puzzle {
+export function makePuzzle(seed: number, size = boardSize(seed), excluded: ReadonlySet<string> = new Set(), attempts = 500, hasSingleton = false): Puzzle {
   if (!BOARD_SIZES.some(/** 僅支援目前遊戲尺寸。 */ value => value === size)) throw new RangeError('Supported sizes: 7, 8, 9, 10');
   if (!Number.isSafeInteger(seed)) throw new RangeError('Seed must be a safe integer');
   if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 10000) throw new RangeError('Attempts must be 1–10000');
+  if (typeof hasSingleton !== 'boolean') throw new RangeError('Singleton policy must be boolean');
   let state = seed >>> 0;
   const random = /** 以固定參數推進種子，讓題目及線索可重現。 */ () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
   const solution = randomSolution(size, random);
   const roots = new Set(solution);
+  // 在色區變動前固定是否有單格色區及其身份，不因搜尋失敗改變條件。
+  const singletonRegion = hasSingleton ? Math.floor(random() * size) : -1;
   const regions = Array.from({ length: size * size }, /** 起始每列一個連通色區，每區包含恰好一個答案。 */ (_, cell) => Math.floor(cell / size));
   const regionSizes = Array<number>(size).fill(size);
   const cap = regionLimit(size);
@@ -164,8 +170,9 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
       if (ra === rb || roots.has(a) || roots.has(b)) continue;
       if (!neighbors(a, size).some(/** 交換後必須與新色區相接。 */ cell => regions[cell] === rb) ||
           !neighbors(b, size).some(/** 另一格亦必須與新色區相接。 */ cell => regions[cell] === ra)) continue;
-      // 四種尺寸皆允許轉移；最多一區可縮至一格，仍須連通及不超上限。
-      const transfer = random() < .35 && regionSizes[rb] < cap && regionSizes[ra] > 1 && (regionSizes[ra] !== 2 || !regionSizes.includes(1));
+      // 指定單格色區只縮不增，其餘色區始終保留 50%～200% 面積。
+      const minimum = ra === singletonRegion ? 1 : regionMinimum(size);
+      const transfer = random() < .35 && rb !== singletonRegion && regionSizes[rb] < cap && regionSizes[ra] > minimum;
       regions[a] = rb;
       if (!transfer) regions[b] = ra;
       if (!connected(regions, size, ra) || !connected(regions, size, rb)) {
@@ -173,6 +180,7 @@ export function makePuzzle(seed: number, size = boardSize(seed), excluded: Reado
       }
       if (transfer) { regionSizes[ra]--; regionSizes[rb]++; }
     }
+    if (hasSingleton && regionSizes[singletonRegion] !== 1) continue;
     const puzzle: Puzzle = { id: `v${GENERATOR_VERSION}:${size}:${seed}`, size, regions: [...regions], solution, givens: [] };
     if (excluded.has(canonicalKey(puzzle))) continue;
     if (solve(puzzle).length !== 1) continue;

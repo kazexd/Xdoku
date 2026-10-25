@@ -1,16 +1,16 @@
 import bank from '../src/data/puzzles.json' with { type: 'json' };
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BOARD_SIZES, GenerationExhaustedError, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed, regionLimit, protectGivens } from '../tools/generator.ts';
+import { BOARD_SIZES, GenerationExhaustedError, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed, regionLimit, regionMinimum, protectGivens } from '../tools/generator.ts';
 
 test('sample seeds have a unique solution, connected regions and a deduction path', /** 驗證測試情境：sample seeds have a unique solution, connected regions and a deduction path。 */ () => {
-  for (const size of [7, 8, 9]) {
-  for (let seed = 1; seed <= 1; seed++) {
-    const p = makePuzzle(seed, size);
+  for (const [size, seed, singleton] of [[7,1,false],[7,1,true],[8,51,false],[8,1,true],[9,6,true],[10,19,true]]) {
+    const p = makePuzzle(seed, size, new Set(), 500, singleton);
     assert.deepEqual(solve(p), [p.solution]);
     const regionSizes = Array(size).fill(0);
     for (const region of p.regions) regionSizes[region]++;
-    assert.ok(regionSizes.every(/** 每一個色區都必須存在。 */ count => count >= 1));
+    assert.equal(regionSizes.filter(/** 精確檢查單格要求。 */ count => count === 1).length, Number(singleton));
+    assert.ok(regionSizes.every(/** 非單格色區遵守新的面積下限。 */ count => count === 1 || count >= regionMinimum(size)));
     assert.ok(regionSizes.filter(/** 統計單格色區以驗證新增生成限制。 */ count => count === 1).length <= 1, `${size}×${size}, seed ${seed}: ${regionSizes}`);
     assert.ok(regionSizes.every(/** 每色不可超過指定面積上限。 */ count => count <= regionLimit(size)));
     assert.deepEqual(p.givens, []);
@@ -32,11 +32,11 @@ test('sample seeds have a unique solution, connected regions and a deduction pat
     assert.ok(!isComplete(p, Array(size * size).fill(0)));
     assert.ok(!isComplete(p, p.solution.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ () => 2)));
   }
-  }
 });
 
-test('area limits use the agreed hard caps', /** 驗證各尺寸面積上限及 7×7 例外。 */ () => {
-  assert.deepEqual(BOARD_SIZES.map(/** 取得各支援尺寸的上限。 */ size => regionLimit(size)), [11, 13, 15, 17]);
+test('area limits use 50 to 200 percent of row count', /** 驗證各尺寸面積上限及 7×7 例外。 */ () => {
+  assert.deepEqual(BOARD_SIZES.map(/** 取得各支援尺寸的上限。 */ size => regionLimit(size)), [14, 16, 18, 20]);
+  assert.deepEqual(BOARD_SIZES.map(/** 下限向上取整。 */ size => regionMinimum(size)),[4,4,5,5]);
 });
 
 test('optimized solver agrees with independent placement checks and clues are necessary', /** 以獨立回溯交叉檢查位元遮罩解題器，並確認兩隻線索不能直接減為一隻。 */ () => {
@@ -51,7 +51,7 @@ test('optimized solver agrees with independent placement checks and clues are ne
     return results;
   }
   for (const size of [7, 8]) {
-    const p = makePuzzle(1, size);
+    const p = makePuzzle(size === 7 ? 1 : 51, size);
     assert.deepEqual(solve(p, 10000), reference(p));
     for (const cell of p.givens) {
       const fewer = { ...p, givens: [cell] };
@@ -86,7 +86,7 @@ test('fixed clues survive reset, saved-state repair, attempted clearing and undo
   assert.deepEqual(solve({ ...sample, givens: [0, 1] }), []);
 });
 test('canonical identity ignores relabeling, rotations and reflections', /** 驗證測試情境：canonical identity ignores relabeling, rotations and reflections。 */ () => {
-  const p = makePuzzle(1, 8);
+  const p = makePuzzle(51, 8);
   const identity = canonicalKey(p);
   for (let mirror = 0; mirror < 2; mirror++) for (let rotation = 0; rotation < 4; rotation++) {
     const regions = Array(p.regions.length);
