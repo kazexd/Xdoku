@@ -61,7 +61,8 @@ test('optimized solver agrees with independent placement checks and clues are ne
 });
 
 test('fixed clues survive reset, saved-state repair, attempted clearing and undo snapshots', /** 驗證線索保護可用於開局、重玩、載入及所有編輯操作。 */ () => {
-  const p = bank.classic.find(/** 舊題庫仍可保護預放線索。 */ p => p.size === 8);
+  const source = bank.classic.find(/** 取得棋盤作為線索保護的獨立測試資料。 */ p => p.size === 8);
+  const p = { ...source, givens: [source.solution[0]] };
   assert.ok(p.givens.length > 0);
   const empty = Array(64).fill(0);
   const snapshot = protectGivens(p);
