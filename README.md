@@ -12,9 +12,13 @@ Dependency audit currently reports five high-severity findings in Expo CLI's tra
 
 ## Status and roadmap
 
-Implemented: 5×5 unique-solution boards, numbered levels, UTC daily boards, placement and exclusion tools, conflict feedback, undo, reveal, restart and local saves. The interface is currently Traditional Chinese.
+Implemented: selectable 5×5, 6×6 and 7×7 unique-solution boards, numbered levels, UTC daily boards, single-tap exclusion marks, double-tap cats, conflict feedback, undo, reveal, restart and local saves. The interface is currently Traditional Chinese.
 
-Before release: expand the small solution-pattern family and difficulty grading; add deduction hints, localization, non-color region cues, original assets and device testing.
+Generation uses seeded randomized backtracking for cat positions, connected region growth, a solver that stops at the second solution, and a deduction-only acceptance check. The deduction pass uses singles and common conflict exclusions across rows, columns and regions. Difficulty is a heuristic: easy uses no group exclusions, medium uses 1–3, and hard uses 4 or more. These labels still need player calibration; board size alone does not determine difficulty.
+
+Classic catalogs exclude duplicate boards across all eight rotations/reflections and region relabeling. Daily boards are deterministic per UTC date and size; they do not check historical daily duplicates. Generation retries at most 5,000 candidates before reporting failure. Catalogs are cached in memory and reproduced from seeds after restart.
+
+Generator v2 stores progress separately by mode, size and versioned puzzle ID. Old v1 saves remain on the device but are not applied to new layouts. Before release: add explanatory deduction hints, localization, non-color region cues, original assets and device testing, including generation latency on older iPhones.
 
 Leaderboards require a trusted backend and validated scores, with assisted attempts separated. Purchases require Apple products, verified entitlements and restore purchases. Neither service is connected; no payments are taken and no rankings are fabricated.
 
