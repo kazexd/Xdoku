@@ -4,6 +4,7 @@ export const DOUBLE_TAP_MS = 300;
 export type LastTap = { cell: number; time: number; board: string; original: Mark };
 
 // Show a single-tap mark immediately. A second tap replaces that same move.
+/** 單擊立即切換記號；同棋盤同格在時間門檻內再點則切換貓咪，並將雙擊合併為一次復原操作。 */
 export function resolveTap(mark: Mark, cell: number, time: number, board: string, last: LastTap | null) {
   const double = last !== null && last.cell === cell && last.board === board &&
     time >= last.time && time - last.time <= DOUBLE_TAP_MS;

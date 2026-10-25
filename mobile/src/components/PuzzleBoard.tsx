@@ -13,14 +13,17 @@ type Props = {
   onDragStart: () => void;
 };
 
+/** 繪製正方形棋盤，管理點擊、拖曳預覽、取消與輔助動作；完成拖曳才向上層提交變更。 */
 export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onInteraction, onDragStart }: Props) {
   const grid = useRef<Grid>({ size: puzzle.size, width: 0, height: 0 });
   const stroke = useRef<Stroke | null>(null);
   const [preview, setPreview] = useState<Mark[] | null>(null);
-  useEffect(() => () => { onInteraction(false); }, [onInteraction]);
+  useEffect(/** 註冊卸載清理程序，確保離開棋盤後恢復外層捲動。 */ () => /** 元件卸載時解除棋盤互動造成的頁面捲動鎖定。 */ () => { onInteraction(false); }, [onInteraction]);
+  /** 扣除棋盤外框，將觸控事件的區域座標轉為內容區座標，供格子落點判斷使用。 */
   function point(event: GestureResponderEvent) {
     return { x: event.nativeEvent.locationX - BORDER, y: event.nativeEvent.locationY - BORDER };
   }
+  /** 結束觸控並恢復頁面捲動；取消時捨棄預覽，否則提交整次拖曳或交由點擊處理。 */
   function finish(cancelled = false, event?: GestureResponderEvent) {
     let current = stroke.current;
     if (current && event && !cancelled) current = moveStroke(current, point(event), grid.current);
@@ -28,39 +31,39 @@ export function PuzzleBoard({ puzzle, marks, disabled, onTap, onStroke, onIntera
     if (!current || cancelled || disabled) return;
     if (current.dragging) {
       onDragStart();
-      if (current.marks.some((mark, i) => mark !== current.original[i])) onStroke(current.marks);
+      if (current.marks.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ (mark, i) => mark !== current.original[i])) onStroke(current.marks);
     } else if (event) {
       const cell = cellAt(current.start, grid.current);
       if (cell !== null) onTap(cell, event.nativeEvent.timestamp);
     }
   }
   const visible = preview ?? marks;
-  const cats = visible.flatMap((mark, i) => mark === 2 ? [i] : []);
-  return <View style={styles.board} onLayout={({ nativeEvent: { layout } }) => {
+  const cats = visible.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (mark, i) => mark === 2 ? [i] : []);
+  return <View style={styles.board} onLayout={/** 記錄扣除外框後的棋盤尺寸，使拖曳座標與實際格子對齊。 */ ({ nativeEvent: { layout } }) => {
     grid.current = { size: puzzle.size, width: layout.width - BORDER * 2, height: layout.height - BORDER * 2 };
-  }} onStartShouldSetResponder={() => !disabled} onResponderGrant={event => {
+  }} onStartShouldSetResponder={/** 僅在棋盤可操作時接管觸控，讓棋盤處理完整手勢。 */ () => !disabled} onResponderGrant={/** 由單指起點建立筆畫快照，並暫停外層頁面的捲動。 */ event => {
     if (disabled || event.nativeEvent.touches.length !== 1) return;
     stroke.current = beginStroke(marks, point(event), grid.current);
     if (stroke.current) onInteraction(true);
-  }} onResponderMove={event => {
+  }} onResponderMove={/** 更新拖曳預覽；多指時取消，首次進入拖曳時清除雙擊狀態。 */ event => {
     if (event.nativeEvent.touches.length !== 1) { finish(true); return; }
     if (!stroke.current || disabled) return;
     const next = moveStroke(stroke.current, point(event), grid.current);
     if (next.dragging && !stroke.current.dragging) onDragStart();
     stroke.current = next;
     if (next.dragging) setPreview(next.marks);
-  }} onResponderRelease={event => finish(event.nativeEvent.touches.length > 0, event)}
-    onResponderTerminationRequest={() => false} onResponderTerminate={() => finish(true)}>
-    {puzzle.regions.map((region, cell) => {
-      const bad = visible[cell] === 2 && cats.some(other => other !== cell && conflicts(puzzle, cell, other));
+  }} onResponderRelease={/** 最後一次更新路徑並結束手勢；仍有其他手指接觸時視為取消。 */ event => finish(event.nativeEvent.touches.length > 0, event)}
+    onResponderTerminationRequest={/** 手勢進行期間保留觸控控制權，避免頁面捲動搶走拖曳。 */ () => false} onResponderTerminate={/** 系統中斷手勢時捨棄預覽並恢復頁面捲動。 */ () => finish(true)}>
+    {puzzle.regions.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (region, cell) => {
+      const bad = visible[cell] === 2 && cats.some(/** 檢查是否存在符合條件的項目，以判斷衝突、變更或候選狀態。 */ other => other !== cell && conflicts(puzzle, cell, other));
       return <View key={cell} pointerEvents="none" accessible accessibilityRole="button"
         accessibilityState={{ disabled }}
         accessibilityLabel={`第 ${Math.floor(cell / puzzle.size) + 1} 列第 ${cell % puzzle.size + 1} 欄，區域 ${region + 1}，${visible[cell] === 2 ? '貓咪' : visible[cell] === 1 ? '已排除' : '空白'}`}
         accessibilityHint="可使用動作選單切換記號或貓咪"
         accessibilityActions={[{ name: 'mark', label: '切換記號' }, { name: 'cat', label: '切換貓咪' }]}
-        onAccessibilityAction={event => {
+        onAccessibilityAction={/** 依螢幕閱讀器選擇切換記號或貓咪，並以一次可復原操作提交。 */ event => {
           if (disabled) return;
-          const next = marks.map((mark, i): Mark => i !== cell ? mark : event.nativeEvent.actionName === 'cat' ? mark === 2 ? 0 : 2 : mark === 1 ? 0 : mark === 2 ? 2 : 1);
+          const next = marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i): Mark => i !== cell ? mark : event.nativeEvent.actionName === 'cat' ? mark === 2 ? 0 : 2 : mark === 1 ? 0 : mark === 2 ? 2 : 1);
           onStroke(next);
         }}
         style={[styles.cell, { width: `${100 / puzzle.size}%`, height: `${100 / puzzle.size}%`,
