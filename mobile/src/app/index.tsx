@@ -7,7 +7,7 @@ import { boardSize, conflicts, dailySeed, isComplete, levelPuzzle, makePuzzle, p
 import { resolveTap, type LastTap } from '../game/taps';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 
-/** 管理關卡、尺寸、每日更新、本機存檔及復原歷史，組合遊戲主畫面與棋盤互動。 */
+/** 管理關卡、尺寸、每日更新、本機存檔，組合遊戲主畫面與棋盤互動。 */
 export default function Home() {
   const [boardInteracting, setBoardInteracting] = useState(false);
   const [mode, setMode] = useState<'classic' | 'daily'>('classic');
@@ -17,8 +17,8 @@ export default function Home() {
   const seed = mode === 'daily' ? day : level;
   const size = boardSize(seed);
   const [marks, setMarks] = useState<Mark[]>(Array(size * size).fill(0));
-  const [history, setHistory] = useState<Mark[][]>([]);
   const lastTap = useRef<LastTap | null>(null);
+  const freshKey = useRef<string | null>(null);
   const [loadedKey, setLoadedKey] = useState('');
   const [notice, setNotice] = useState('每列、每欄、每個色區各一隻貓；貓咪不能相鄰，包含對角線。');
   const puzzle = useMemo(/** 依目前模式、種子與尺寸取得棋盤，僅在相關依賴改變時重新計算。 */ () => mode === 'daily' ? makePuzzle(seed, size) : levelPuzzle(level, size), [seed, size, mode, level]);
@@ -28,23 +28,33 @@ export default function Home() {
   useEffect(/** 定期檢查 UTC 日期是否變更，並在元件卸載時清除計時器。 */ () => { const timer = setInterval(/** 重新取得 UTC 每日種子，使跨日後的每日棋盤更新。 */ () => setDay(dailySeed()), 30000); return /** 元件卸載時停止日期輪詢，避免計時器持續執行。 */ () => clearInterval(timer); }, []);
   useEffect(/** 載入並驗證目前棋盤存檔；以清理旗標防止過期的非同步結果覆蓋新棋盤。 */ () => {
     let active = true;
-    AsyncStorage.getItem(key).then(/** 忽略已失效的載入結果，重設復原歷史並套用尺寸與記號值皆合法的存檔。 */ raw => {
+    AsyncStorage.getItem(key).then(/** 忽略已失效的載入結果，套用尺寸與記號值皆合法的存檔。 */ raw => {
       if (!active) return;
-      setHistory([]); setMarks(protectGivens(puzzle));
+      setMarks(protectGivens(puzzle));
+      if (freshKey.current === key) { freshKey.current = null; return; }
       if (raw) { const saved: unknown = JSON.parse(raw); if (Array.isArray(saved) && saved.length === size * size && saved.every(/** 確認所有項目均符合此步驟的合法性或共同衝突條件。 */ v => v === 0 || v === 1 || v === 2)) setMarks(protectGivens(puzzle, saved)); }
-    }).catch(/** 載入失敗時清空棋盤及歷史，並顯示重新開始的訊息。 */ () => { if (active) { setHistory([]); setMarks(protectGivens(puzzle)); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
+    }).catch(/** 載入失敗時清空棋盤，並顯示重新開始的訊息。 */ () => { if (active) { if (freshKey.current === key) freshKey.current = null; setMarks(protectGivens(puzzle)); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
     return /** 標記本次載入已失效，避免離開棋盤後仍套用非同步結果。 */ () => { active = false; };
   }, [key, size, puzzle]);
   useEffect(/** 只在目前棋盤完成載入後儲存記號；儲存失敗時提供使用者回饋。 */ () => { if (ready) AsyncStorage.setItem(key, JSON.stringify(marks)).catch(/** 儲存失敗時顯示訊息，讓使用者知道進度可能未寫入。 */ () => setNotice('進度儲存失敗，請確認裝置儲存空間。')); }, [key, marks, ready]);
-  /** 提交一次棋盤變更，保存變更前快照供復原，並清除尚待判定的雙擊狀態。 */
-  function change(next: Mark[]) { lastTap.current = null; setHistory(/** 將變更前的棋盤附加至復原歷史。 */ h => [...h, marks]); setMarks(protectGivens(puzzle, next)); }
-  /** 依點擊時間判定單擊／雙擊，更新指定格子，避免雙擊額外新增一筆復原紀錄。 */
+  /** 提交棋盤變更並清除雙擊狀態，同時保護預放線索。 */
+  function change(next: Mark[]) { lastTap.current = null; setMarks(protectGivens(puzzle, next)); }
+  /** 依點擊時間判定單擊／雙擊，更新指定格子，讓第二下正確取代第一下的記號。 */
   function tapCell(cell: number, time: number) {
     if (puzzle.givens?.includes(cell)) { lastTap.current = null; return; }
     const result = resolveTap(marks[cell], cell, time, key, lastTap.current);
     lastTap.current = result.lastTap;
-    if (!result.replaceMove) setHistory(/** 將變更前的棋盤附加至復原歷史。 */ h => [...h, marks]);
     setMarks(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (mark, i) => i === cell ? result.mark : mark));
+  }
+  /** 開新一局時前往下一個一般關卡，清除雙擊、載入及提示訊息，保留每日挑戰原題與存檔。 */
+  function startNewGame() {
+    const nextLevel = level + 1;
+    freshKey.current = `xdoku:classic:${levelPuzzle(nextLevel).id}`;
+    lastTap.current = null;
+    setLoadedKey('');
+    setMode('classic');
+    setLevel(nextLevel);
+    setNotice('每列、每欄、每個色區各一隻貓；貓咪不能相鄰，包含對角線。');
   }
   const cats = marks.flatMap(/** 篩選符合條件的格子並攤平成一維索引陣列。 */ (m, i) => m === 2 ? [i] : []);
   return <SafeAreaView style={s.safe}><StatusBar style="dark" /><ScrollView scrollEnabled={!boardInteracting} contentContainerStyle={s.page}>
@@ -56,8 +66,7 @@ export default function Home() {
     <PuzzleBoard key={key} puzzle={puzzle} marks={marks} disabled={!ready || complete} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />
     <Text style={s.gestureHint}>🔒 為題目預放線索，不能移除，也不計作使用提示。</Text>
     <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。</Text>
-    <View style={s.tools}><Pressable disabled={!history.length || !ready} onPress={/** 恢復上一份棋盤快照並移除該筆歷史，同時清除雙擊狀態。 */ () => { lastTap.current = null; setMarks(protectGivens(puzzle, history[history.length - 1])); setHistory(/** 移除已復原的最後一份歷史快照。 */ h => h.slice(0, -1)); }} style={s.action}><Text>↶ 復原</Text></Pressable><Pressable disabled={!ready || complete} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready} onPress={/** 將棋盤重設為空白，並保留一筆可復原的操作紀錄。 */ () => change(Array(size * size).fill(0))} style={s.action}><Text>重新開始</Text></Pressable></View>
-    {complete && mode === 'classic' && <Pressable style={s.next} onPress={/** 前往下一關，清除雙擊與已載入識別以重新讀取進度。 */ () => { lastTap.current = null; setLoadedKey(''); setLevel(/** 將一般關卡編號遞增一關。 */ v => v + 1); }}><Text style={s.nextText}>下一個小花園 →</Text></Pressable>}
+    <View style={s.tools}><Pressable accessibilityRole="button" disabled={!ready || boardInteracting} onPress={startNewGame} style={s.action}><Text>開新一局</Text></Pressable><Pressable disabled={!ready || complete} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready} onPress={/** 重玩目前題目並保留固定線索。 */ () => change(Array(size * size).fill(0))} style={s.action}><Text>重新開始</Text></Pressable></View>
     <View style={s.card}><Text style={s.cardTitle}>遊玩小筆記</Text><Text style={s.note}>{notice}</Text></View>
     <View style={s.footer}><Text style={s.cardTitle}>接下來的旅程</Text><Text style={s.note}>排行榜與商店尚未開通。此開發版提供離線遊玩與本機進度儲存。</Text></View>
   </ScrollView></SafeAreaView>;

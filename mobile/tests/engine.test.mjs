@@ -2,6 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BOARD_SIZES, GENERATOR_VERSION, boardSize, canonicalKey, levelPuzzle, ratePuzzle, makePuzzle, solve, conflicts, isComplete, dailySeed, regionLimit, protectGivens } from '../src/game/engine.ts';
 
+test('a new classic round has a different puzzle and starts with only its own clues', /** 驗證開新一局會更換棋盤並使用新題目的線索，不會繼承舊局記號或影響每日題目。 */ () => {
+  const daily = makePuzzle(dailySeed(new Date('2026-10-25T00:00:00Z')));
+  const before = JSON.stringify(daily);
+  const first = levelPuzzle(1), next = levelPuzzle(2);
+  assert.notEqual(first.id, next.id);
+  assert.notEqual(canonicalKey(first), canonicalKey(next));
+  const marks = protectGivens(next);
+  assert.equal(marks.filter(/** 計算新局的貓咪，應僅包含題目線索。 */ mark => mark === 2).length, next.givens.length);
+  assert.ok(!marks.includes(1));
+  assert.deepEqual(protectGivens(next, Array(next.size * next.size).fill(0)), marks);
+  assert.equal(JSON.stringify(daily), before);
+});
+
 test('automatic size selection covers 7–10, stays stable and matches generated boards', /** 驗證自動選題涵蓋四種尺寸，重開不改變棋盤，每日尺寸亦不受時區影響。 */ () => {
   const counts = new Map(BOARD_SIZES.map(/** 初始化各尺寸出現次數。 */ size => [size, 0]));
   for (let seed = 1; seed <= 1000; seed++) {
