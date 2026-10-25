@@ -6,12 +6,15 @@ import { StatusBar } from 'expo-status-bar';
 import { conflicts, dailySeed, isComplete, protectGivens, type Mark } from '../game/engine';
 import { CLASSIC_COUNT, classicPuzzle, dailyPuzzle } from '../game/catalog';
 import { applyMove, restoreRound, MAX_FISH } from '../game/lives';
+import { newlyFoundCat } from '../game/sound';
+import { useCorrectSound } from '../game/useCorrectSound';
 import { resolveTap, type LastTap } from '../game/taps';
 import { Confetti } from '../components/Confetti';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 
 /** 管理關卡、尺寸、每日更新、本機存檔，組合遊戲主畫面與棋盤互動。 */
 export default function Home() {
+  const playCorrectSound = useCorrectSound();
   const [boardInteracting, setBoardInteracting] = useState(false);
   const [mode, setMode] = useState<'classic' | 'daily'>('classic');
   const [level, setLevel] = useState(1);
@@ -68,8 +71,8 @@ export default function Home() {
     if (blocked || inputLock.current) return;
     lastTap.current = null;
     const result = applyMove(puzzle, { marks, fish, mistakes }, next);
-    const found = result.round.marks.findIndex(/** 記住本次新放下的正確貓咪。 */ (mark, cell) => mark === 2 && marks[cell] !== 2);
-    if (found >= 0) setLastCat(found);
+    const found = newlyFoundCat(puzzle, marks, result.round.marks);
+    if (found >= 0) { setLastCat(found); playCorrectSound(); }
     setMarks(result.round.marks); setFish(result.round.fish); setMistakes(result.round.mistakes);
     if (result.wrong !== null) {
       inputLock.current = true; setFeedback({ key, cell: result.wrong, red: false });

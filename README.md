@@ -46,3 +46,5 @@ Wrong guesses are locked as X for the rest of the round. Taps, drag marking and 
 Correct cats, including cats revealed by hints, are locked once placed. They remain locked after reloading saved progress. Restart or a new game clears them.
 
 Completing a puzzle locks the board, briefly bounces the last cat and plays confetti, then shows congratulations, remaining fish and hint usage. Players choose Next level to continue with a fresh round; daily completion offers a return to classic play. The final classic puzzle celebrates completion of the catalog and offers viewing the finished board. Hint usage persists with progress and clears on restart.
+
+New correct cat placements play a soft, original 0.28-second ascending chime, bundled for offline use through expo-audio. Hint reveals also play it; existing cats, marks, wrong guesses and save loading do not. Playback respects iPhone silent mode and mixes with other audio. No recording or background audio permissions are enabled.
