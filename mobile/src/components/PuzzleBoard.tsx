@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, View, type GestureResponderEvent, type ViewStyle } from 'react-native';
 import { conflicts, protectGivens, type Mark, type Puzzle } from '../game/engine';
 import { beginStroke, cellAt, moveStroke, type Grid, type Stroke } from '../game/drag';
 import { MARK_COLOR, regionColor } from '../game/palette';
 
 const BORDER = 3;
 type Props = {
-  puzzle: Puzzle; marks: Mark[]; disabled: boolean; lockedCells?: number[]; errorCell?: number; errorRed?: boolean;
+  puzzle: Puzzle; marks: Mark[]; disabled: boolean; lockedCells?: number[]; errorCell?: number; errorRed?: boolean; celebrateCell?: number;
   onTap: (cell: number, time: number) => void;
   onStroke: (marks: Mark[]) => void;
   onInteraction: (active: boolean) => void;
@@ -14,7 +14,18 @@ type Props = {
 };
 
 /** 繪製正方形棋盤，管理點擊、拖曳預覽、取消與輔助動作；完成拖曳才向上層提交變更。 */
-export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCell, errorRed, onTap, onStroke, onInteraction, onDragStart }: Props) {
+export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCell, errorRed, celebrateCell, onTap, onStroke, onInteraction, onDragStart }: Props) {
+  const [bounce] = useState(/** 為元件建立固定的動畫數值。 */ () => new Animated.Value(0));
+  useEffect(/** 最後找到的貓咪輕彈一次，切換題目或重玩時清理。 */ () => {
+    bounce.setValue(0);
+    if (celebrateCell === undefined) return;
+    const animation = Animated.sequence([
+      Animated.timing(bounce, { toValue: -10, duration: 180, useNativeDriver: true }),
+      Animated.spring(bounce, { toValue: 0, friction: 4, useNativeDriver: true }),
+    ]);
+    animation.start();
+    return /** 停止舊題目的彈跳動畫。 */ () => animation.stop();
+  }, [celebrateCell, bounce]);
   const grid = useRef<Grid>({ size: puzzle.size, width: 0, height: 0 });
   const stroke = useRef<Stroke | null>(null);
   const [preview, setPreview] = useState<Mark[] | null>(null);
@@ -76,7 +87,7 @@ export function PuzzleBoard({ puzzle, marks, disabled, lockedCells = [], errorCe
           backgroundColor: errorCell === cell && errorRed ? '#791F2B' : regionColor(region),
           borderRightWidth: cell % puzzle.size === puzzle.size - 1 || puzzle.regions[cell + 1] !== region ? 3 : .5,
           borderBottomWidth: cell >= puzzle.size * (puzzle.size - 1) || puzzle.regions[cell + puzzle.size] !== region ? 3 : .5 }]}>
-        <Text style={{ fontSize: Math.min(23, 180 / puzzle.size), color: MARK_COLOR, userSelect: 'none' }}>{errorCell === cell || visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Text>
+        <Animated.Text style={{ transform: [{ translateY: cell === celebrateCell ? bounce : 0 }], fontSize: Math.min(23, 180 / puzzle.size), color: MARK_COLOR, userSelect: 'none' }}>{errorCell === cell || visible[cell] === 2 ? '🐱' : visible[cell] === 1 ? '×' : ''}</Animated.Text>
         {given && <Text accessible={false} style={styles.givenBadge}>🔒</Text>}
         {bad && <View accessible={false} style={styles.conflictRing}><Text style={styles.conflictBadge}>!</Text></View>}
       </View>;

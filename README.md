@@ -44,3 +44,5 @@ Each round starts with three fish (🐟). Placing a cat outside the stored solut
 Wrong guesses are locked as X for the rest of the round. Taps, drag marking and accessibility actions cannot change them. Locked cells persist in saved progress and clear on restart or a new game. Existing saves without mistake history cannot recover previously wrong cells.
 
 Correct cats, including cats revealed by hints, are locked once placed. They remain locked after reloading saved progress. Restart or a new game clears them.
+
+Completing a puzzle locks the board, briefly bounces the last cat and plays confetti, then shows congratulations, remaining fish and hint usage. Players choose Next level to continue with a fresh round; daily completion offers a return to classic play. The final classic puzzle celebrates completion of the catalog and offers viewing the finished board. Hint usage persists with progress and clears on restart.

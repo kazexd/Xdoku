@@ -7,6 +7,7 @@ import { conflicts, dailySeed, isComplete, protectGivens, type Mark } from '../g
 import { CLASSIC_COUNT, classicPuzzle, dailyPuzzle } from '../game/catalog';
 import { applyMove, restoreRound, MAX_FISH } from '../game/lives';
 import { resolveTap, type LastTap } from '../game/taps';
+import { Confetti } from '../components/Confetti';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 
 /** 管理關卡、尺寸、每日更新、本機存檔，組合遊戲主畫面與棋盤互動。 */
@@ -19,6 +20,10 @@ export default function Home() {
   const puzzle = mode === 'daily' ? dailyPuzzle(day) : classicPuzzle(level);
   const size = puzzle.size;
   const [marks, setMarks] = useState<Mark[]>(Array(size * size).fill(0));
+  const [usedHint, setUsedHint] = useState(false);
+  const [lastCat, setLastCat] = useState<number | undefined>();
+  const [celebratedKey, setCelebratedKey] = useState('');
+  const [dismissedKey, setDismissedKey] = useState('');
   const [mistakes, setMistakes] = useState<number[]>([]);
   const [fish, setFish] = useState(MAX_FISH);
   const [feedback, setFeedback] = useState<{ key: string; cell: number; red: boolean } | null>(null);
@@ -30,6 +35,11 @@ export default function Home() {
   const key = mode === 'daily' ? `xdoku:daily:${day}:${puzzle.id}` : `xdoku:classic:${puzzle.id}`;
   const ready = loadedKey === key;
   const complete = ready && isComplete(puzzle, marks);
+  useEffect(/** 完成後保留一秒慶祝，之後才顯示結果彈窗。 */ () => {
+    if (!complete) return;
+    const timer = setTimeout(/** 顯示目前題目的過關結果。 */ () => setCelebratedKey(key), 1000);
+    return /** 題目切換或重玩時取消過期結果。 */ () => clearTimeout(timer);
+  }, [complete, key]);
   const animating = feedback?.key === key;
   const gameOver = ready && fish === 0 && !animating;
   const blocked = !ready || complete || fish === 0 || animating;
@@ -46,18 +56,20 @@ export default function Home() {
     let active = true;
     AsyncStorage.getItem(key).then(/** 忽略已失效的載入結果，套用尺寸與記號值皆合法的存檔。 */ raw => {
       if (!active) return;
-      setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setFeedback(null);
+      setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setUsedHint(false); setLastCat(undefined); setDismissedKey(''); setCelebratedKey(''); setFeedback(null);
       if (freshKey.current === key) { freshKey.current = null; return; }
-      if (raw) { const saved = restoreRound(puzzle, JSON.parse(raw)); setMarks(saved.marks); setFish(saved.fish); setMistakes(saved.mistakes); }
-    }).catch(/** 載入失敗時清空棋盤，並顯示重新開始的訊息。 */ () => { if (active) { if (freshKey.current === key) freshKey.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setFeedback(null); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
+      if (raw) { const data = JSON.parse(raw); const saved = restoreRound(puzzle, data); setUsedHint(data?.usedHint === true); setMarks(saved.marks); setFish(saved.fish); setMistakes(saved.mistakes); }
+    }).catch(/** 載入失敗時清空棋盤，並顯示重新開始的訊息。 */ () => { if (active) { if (freshKey.current === key) freshKey.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setUsedHint(false); setLastCat(undefined); setDismissedKey(''); setCelebratedKey(''); setFeedback(null); setNotice('無法讀取進度，將開始新遊戲。'); } }).finally(/** 非同步載入結束且結果仍有效時，將目前棋盤標為可操作。 */ () => { if (active) setLoadedKey(key); });
     return /** 標記本次載入已失效，避免離開棋盤後仍套用非同步結果。 */ () => { active = false; };
   }, [key, size, puzzle]);
-  useEffect(/** 只在目前棋盤完成載入後儲存記號；儲存失敗時提供使用者回饋。 */ () => { if (ready) AsyncStorage.setItem(key, JSON.stringify({ marks, fish, mistakes })).catch(/** 儲存失敗時顯示訊息，讓使用者知道進度可能未寫入。 */ () => setNotice('進度儲存失敗，請確認裝置儲存空間。')); }, [key, marks, fish, mistakes, ready]);
+  useEffect(/** 只在目前棋盤完成載入後儲存記號；儲存失敗時提供使用者回饋。 */ () => { if (ready) AsyncStorage.setItem(key, JSON.stringify({ marks, fish, mistakes, usedHint })).catch(/** 儲存失敗時顯示訊息，讓使用者知道進度可能未寫入。 */ () => setNotice('進度儲存失敗，請確認裝置儲存空間。')); }, [key, marks, fish, mistakes, usedHint, ready]);
   /** 提交棋盤變更並清除雙擊狀態，同時保護預放線索。 */
   function change(next: Mark[]) {
     if (blocked || inputLock.current) return;
     lastTap.current = null;
     const result = applyMove(puzzle, { marks, fish, mistakes }, next);
+    const found = result.round.marks.findIndex(/** 記住本次新放下的正確貓咪。 */ (mark, cell) => mark === 2 && marks[cell] !== 2);
+    if (found >= 0) setLastCat(found);
     setMarks(result.round.marks); setFish(result.round.fish); setMistakes(result.round.mistakes);
     if (result.wrong !== null) {
       inputLock.current = true; setFeedback({ key, cell: result.wrong, red: false });
@@ -65,7 +77,7 @@ export default function Home() {
     }
   }
   /** 明確重新開始同題並恢復三條魚。 */
-  function restart() { if (animating || !ready) return; lastTap.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setNotice('重新開始，三條魚已補滿。'); }
+  function restart() { if (animating || !ready) return; lastTap.current = null; setMarks(protectGivens(puzzle)); setFish(MAX_FISH); setMistakes([]); setUsedHint(false); setLastCat(undefined); setDismissedKey(''); setCelebratedKey(''); setNotice('重新開始，三條魚已補滿。'); }
   /** 依點擊時間判定單擊／雙擊，更新指定格子，讓第二下正確取代第一下的記號。 */
   function tapCell(cell: number, time: number) {
     if (blocked || inputLock.current) return;
@@ -94,17 +106,30 @@ export default function Home() {
     <Text style={s.title}>{complete ? '全都找到家了！' : '幫貓咪找個位置'}</Text>
     <Text style={s.subtitle}>{complete ? '做得好，享受這一刻的小小成就。' : `${size} × ${size} · ${{ easy: '簡單', medium: '中等', hard: '困難' }[puzzle.rating!.difficulty]}     ${ready ? cats.length : 0} / ${size} 隻貓咪`}</Text>
     <Text accessibilityLabel={`剩餘 ${ready ? fish : MAX_FISH} 次機會`} style={s.fish}>{Array.from({ length: MAX_FISH }, /** 顯示剩餘與已消耗的魚。 */ (_, i) => <Text key={i} style={{ opacity: i < fish ? 1 : .2 }}>🐟 </Text>)}</Text>
-    <PuzzleBoard key={key} lockedCells={mistakes} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />
+    <View style={{ position: 'relative' }}><PuzzleBoard key={key} celebrateCell={complete ? lastCat : undefined} lockedCells={mistakes} puzzle={puzzle} marks={marks} errorCell={animating ? feedback.cell : undefined} errorRed={animating && feedback.red} disabled={blocked} onTap={tapCell} onStroke={change} onInteraction={setBoardInteracting} onDragStart={/** 開始拖曳時清除前一次點擊，避免下一次點擊被誤判為雙擊。 */ () => { lastTap.current = null; }} />{complete && celebratedKey !== key && <Confetti key={key} />}</View>
     {(puzzle.givens?.length ?? 0) > 0 && <Text style={s.gestureHint}>🔒 為題目預放線索，不能移除，也不計作使用提示。</Text>}
     <Text style={s.gestureHint}>點一下做記號 ×　·　連按兩下放貓咪 🐱。拖曳可快速標記；從已有記號的格子開始拖曳可清除。</Text>
-    <View style={s.tools}><Pressable accessibilityRole="button" disabled={!ready || boardInteracting || level >= CLASSIC_COUNT} onPress={startNewGame} style={s.action}><Text>{level >= CLASSIC_COUNT ? '題庫已用完' : '開新一局'}</Text></Pressable><Pressable disabled={blocked} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready || animating || gameOver} onPress={restart} style={s.action}><Text>重新開始</Text></Pressable></View>
+    <View style={s.tools}><Pressable accessibilityRole="button" disabled={!ready || boardInteracting || level >= CLASSIC_COUNT} onPress={startNewGame} style={s.action}><Text>{level >= CLASSIC_COUNT ? '題庫已用完' : '開新一局'}</Text></Pressable><Pressable disabled={blocked} onPress={/** 揭示尚未放置的答案格，清除與該位置衝突的貓咪並提示本局已使用協助。 */ () => { const cell = puzzle.solution.find(/** 取得第一個符合條件的候選格或群組。 */ i => marks[i] !== 2); if (cell !== undefined) { change(marks.map(/** 將每個項目轉換為本步驟所需的格子、記號或呈現資料。 */ (m, i) => i === cell ? 2 : m === 2 && conflicts(puzzle, i, cell) ? 0 : m)); setUsedHint(true); setNotice('已揭示一隻貓的位置；本局使用了提示。'); } }} style={s.action}><Text>✧ 揭示一格</Text></Pressable><Pressable disabled={!ready || animating || gameOver} onPress={restart} style={s.action}><Text>重新開始</Text></Pressable></View>
     <View style={s.card}><Text style={s.cardTitle}>遊玩小筆記</Text><Text style={s.note}>{notice}</Text></View>
     <View style={s.footer}><Text style={s.cardTitle}>接下來的旅程</Text><Text style={s.note}>排行榜與商店尚未開通。目前內建 {CLASSIC_COUNT} 個一般關卡，可離線遊玩並儲存進度。</Text></View>
   </ScrollView><Modal visible={gameOver} transparent animationType="fade" onRequestClose={/** 機會用盡後保留結束畫面。 */ () => {}}>
     <View style={s.overlay}><View accessibilityViewIsModal style={s.dialog}><Text style={s.title}>Game Over</Text><Text style={s.note}>三條魚已用完，再挑戰一局吧。</Text><Pressable accessibilityRole="button" onPress={level < CLASSIC_COUNT ? startNewGame : restart} style={s.next}><Text style={s.nextText}>{level < CLASSIC_COUNT ? '開新一局' : '重新挑戰本關'}</Text></Pressable></View></View>
+  </Modal><Modal visible={complete && celebratedKey === key && dismissedKey !== key} transparent animationType="fade" onRequestClose={/** 由玩家明確選擇下一步。 */ () => {}}>
+    <View style={s.overlay}><View accessibilityViewIsModal style={s.dialog}>
+      <Text style={s.title}>喵～全部找到了！🎉</Text>
+      <Text style={s.note}>{mode === 'daily' ? '每日挑戰完成，貓咪都找到家了。' : level === CLASSIC_COUNT ? '所有關卡已完成！' : `第 ${level} 關完成，貓咪都找到家了。`}</Text>
+      <Text accessibilityLabel={`過關剩餘 ${fish} 條魚`} style={s.resultFish}>剩餘機會 {'🐟'.repeat(fish)}</Text>
+      {usedHint && <Text style={s.note}>本關使用了提示</Text>}
+      <Pressable accessibilityRole="button" style={s.next} onPress={/** 保留成果直到玩家繼續，每日完成後回到漫遊模式。 */ () => {
+        if (level < CLASSIC_COUNT) startNewGame();
+        else if (mode === 'daily') { lastTap.current = null; setLoadedKey(''); setMode('classic'); }
+        else setDismissedKey(key);
+      }}><Text style={s.nextText}>{mode === 'daily' ? '繼續漫遊關卡' : level === CLASSIC_COUNT ? '查看完成棋盤' : '下一關 →'}</Text></Pressable>
+    </View></View>
   </Modal></SafeAreaView>;
 }
 const s = StyleSheet.create({
+  resultFish: { fontSize: 20, marginTop: 18, color: '#435641' },
   fish: { fontSize: 26, textAlign: 'center', marginBottom: 16 },
   overlay: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: 28 },
   dialog: { backgroundColor: '#faf7f0', borderRadius: 20, padding: 28, width: '100%', maxWidth: 380 },

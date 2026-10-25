@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { isComplete } from '../src/game/engine.ts';
 import { applyMove, restoreRound, MAX_FISH } from '../src/game/lives.ts';
 import bank from '../src/data/puzzles.json' with { type: 'json' };
 const p = bank.classic[0];
@@ -63,4 +64,17 @@ test('correct cats remain locked against all edits and after reloading', /** 驗
   const edited = applyMove(p, round, next).round;
   assert.equal(edited.marks[cell], 2); assert.equal(edited.marks[p.solution[1]], 1);
   assert.equal(fresh().marks[cell], 0);
+});
+
+
+test('completion occurs only after the final correct cat; new rounds reset all progress', /** 驗證過關觸發邊界及下一局初始狀態。 */ () => {
+  let round = fresh();
+  for (let i = 0; i < p.solution.length; i++) {
+    assert.equal(isComplete(p, round.marks), false);
+    round = move(round, p.solution[i], 2).round;
+  }
+  assert.equal(isComplete(p, round.marks), true);
+  assert.equal(round.fish, 3);
+  assert.equal(isComplete(p, fresh().marks), false);
+  assert.deepEqual(fresh().mistakes, []);
 });
