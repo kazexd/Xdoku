@@ -9,7 +9,9 @@ import { isComplete, BOARD_SIZES } from '../src/game/engine.ts';
 function save(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
-  try { writeFileSync(temporary, JSON.stringify(value) + '\n'); renameSync(temporary, path); }
+  const content = JSON.stringify(value) + '\n';
+  if (existsSync(path) && readFileSync(path,'utf8') === content) return;
+  try { writeFileSync(temporary, content); renameSync(temporary, path); }
   finally { if (existsSync(temporary)) unlinkSync(temporary); }
 }
 
@@ -50,12 +52,12 @@ export function validateGroupPuzzle(p, group) {
 function writeGroups(output, state, changedId) {
   if (!output) return;
   const summaries = state.groups.map(/** 每組獨立輸出，未填滿亦保留已驗證成果。 */ group => {
-    const complete = group.puzzles.length === state.config.perCase;
+    const complete = group.puzzles.length >= state.config.perCase;
     const filename = `${group.id}.json`;
     if (changedId === undefined || changedId === group.id) save(resolve(output,filename), { schemaVersion: 1, generatorVersion: GENERATOR_VERSION, ...group, target: state.config.perCase, complete });
     return { id: group.id, size: group.size, hasSingleton: group.hasSingleton, file: filename, count: group.puzzles.length, target: state.config.perCase, complete };
   });
-  save(resolve(output,'manifest.json'), { schemaVersion: 1, generatorVersion: GENERATOR_VERSION, seed: state.config.seed, attempts: state.config.attempts, tried: state.tried, complete: summaries.every(/** 全部八組填滿才視為完成。 */ group => group.complete), groups: summaries });
+  save(resolve(output,'manifest.json'), { schemaVersion: 1, generatorVersion: GENERATOR_VERSION, seed: state.config.seed, attempts: state.config.attempts, tried: state.tried, cursor: state.cursor, complete: summaries.every(/** 全部八組填滿才視為完成。 */ group => group.complete), groups: summaries });
 }
 
 /** 輪流搜尋八組，保存全域去重與斷點；每組條件不因失敗而改變。 */
@@ -67,13 +69,42 @@ export function buildGroups(options = {}, progress = /** 測試預設不輸出�
   let state = { config, tried: 0, cursor: 0, groups: cases.map(/** 初始化八組獨立題目陣列。 */ group => ({ ...group, puzzles: [] })) };
   if (checkpoint && existsSync(checkpoint)) {
     state = JSON.parse(readFileSync(checkpoint,'utf8'));
-    if (JSON.stringify(state.config) !== JSON.stringify(config)) throw new Error('Checkpoint configuration mismatch; choose another --checkpoint');
+    if (state.config?.version !== config.version || state.config.seed !== seed || state.config.attempts !== attempts) throw new Error('Checkpoint configuration mismatch; choose another --checkpoint');
+    state.config = config;
     if (!Number.isSafeInteger(state.tried) || state.tried < 0 || state.tried > 0xffffffff - seed || !Number.isSafeInteger(state.cursor) || state.cursor < state.tried || state.cursor > state.tried * 8 || !Array.isArray(state.groups) || state.groups.length !== cases.length) throw new Error('Invalid checkpoint state');
+  }
+  // 即使斷點遺失或落後，仍從已輸出的分組成果補回題目；先驗證，後寫入。
+  if (output) {
+    const manifestPath = resolve(output,'manifest.json');
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath,'utf8'));
+      if (manifest.schemaVersion !== 1 || manifest.generatorVersion !== GENERATOR_VERSION || manifest.seed !== seed || manifest.attempts !== attempts || !Number.isSafeInteger(manifest.tried) || manifest.tried < 0 || manifest.tried > 0xffffffff - seed || (manifest.cursor !== undefined && (!Number.isSafeInteger(manifest.cursor) || manifest.cursor < manifest.tried || manifest.cursor > manifest.tried * cases.length))) throw new Error('Output manifest configuration or counters mismatch');
+      if (manifest.tried > state.tried) {
+        state.tried = manifest.tried;
+        state.cursor = manifest.cursor ?? manifest.tried * cases.length;
+      }
+    }
+    cases.forEach(/** 逐組讀取已有結果，不相信 complete 或 target 標籤，依實際題數判斷。 */ (expected, i) => {
+      const path = resolve(output,`${expected.id}.json`);
+      if (!existsSync(path)) return;
+      const existing = JSON.parse(readFileSync(path,'utf8'));
+      if (existing.schemaVersion !== 1 || existing.generatorVersion !== GENERATOR_VERSION || existing.id !== expected.id || existing.size !== expected.size || existing.hasSingleton !== expected.hasSingleton || !Array.isArray(existing.puzzles)) throw new Error('Invalid existing output group');
+      if (!Array.isArray(state.groups[i]?.puzzles)) throw new Error('Invalid checkpoint group');
+      const byId = new Map(state.groups[i].puzzles.map(/** 保留斷點原順序，僅追加輸出中尚未記錄的題目。 */ p => [p.id,p]));
+      const outputIds = new Set();
+      for (const puzzle of existing.puzzles) {
+        if (outputIds.has(puzzle.id)) throw new Error('Duplicate existing output puzzle');
+        outputIds.add(puzzle.id);
+        if (byId.has(puzzle.id)) {
+          if (JSON.stringify(byId.get(puzzle.id)) !== JSON.stringify(puzzle)) throw new Error('Conflicting existing output puzzle');
+        } else { state.groups[i].puzzles.push(puzzle); byId.set(puzzle.id,puzzle); }
+      }
+    });
   }
   const used = new Set(), ids = new Set();
   let accepted = 0;
   state.groups.forEach(/** 嚴格驗證斷點內容，重建全域去重。 */ (group, i) => {
-    if (group.id !== cases[i].id || group.size !== cases[i].size || group.hasSingleton !== cases[i].hasSingleton || !Array.isArray(group.puzzles) || group.puzzles.length > perCase) throw new Error('Invalid checkpoint group');
+    if (group.id !== cases[i].id || group.size !== cases[i].size || group.hasSingleton !== cases[i].hasSingleton || !Array.isArray(group.puzzles)) throw new Error('Invalid checkpoint group');
     for (const puzzle of group.puzzles) {
       validateGroupPuzzle(puzzle, group);
       const key = canonicalKey(puzzle);
@@ -81,17 +112,23 @@ export function buildGroups(options = {}, progress = /** 測試預設不輸出�
       used.add(key); ids.add(puzzle.id); accepted++;
     }
   });
-  if (accepted > state.tried) throw new Error('Invalid checkpoint counters');
+  // 沒有完整種子紀錄時，以已保留題數作保守起點；全域去重仍防止重複收錄。
+  state.tried = Math.max(state.tried,accepted);
+  state.cursor = Math.max(state.cursor,state.tried);
+  const total = state.groups.reduce(/** 已超額的組別只計到目標，保留額外題目而不截斷。 */ (sum,group) => sum + Math.min(group.puzzles.length,perCase),0);
+  let filled = total;
+  for (const group of state.groups) progress({ status: group.puzzles.length >= perCase ? 'skip' : 'resume', caseId: group.id, count: group.puzzles.length, perCase, tried: state.tried, maxSeeds, accepted: filled, total: perCase * cases.length });
+  if (checkpoint) save(checkpoint,state);
   writeGroups(output,state);
-  while (accepted < perCase * cases.length && state.tried < maxSeeds) {
+  while (filled < perCase * cases.length && state.tried < maxSeeds) {
     const group = state.groups[state.cursor++ % cases.length];
-    if (group.puzzles.length === perCase) continue;
+    if (group.puzzles.length >= perCase) continue;
     let changed = false;
     try {
       const generated = makePuzzle(seed + state.tried, group.size, used, attempts, group.hasSingleton);
       const puzzle = { ...generated, id: puzzleId(generated) };
       validateGroupPuzzle(puzzle, group);
-      group.puzzles.push(puzzle); used.add(canonicalKey(puzzle)); ids.add(puzzle.id); accepted++; changed = true;
+      group.puzzles.push(puzzle); used.add(canonicalKey(puzzle)); ids.add(puzzle.id); accepted++; filled++; changed = true;
     } catch (error) { if (!(error instanceof GenerationExhaustedError)) throw error; }
     state.tried++;
     // 新題目立即落盤；連續失敗時每 25 個種子保存一次，減少大題庫的寫入量。
@@ -99,9 +136,9 @@ export function buildGroups(options = {}, progress = /** 測試預設不輸出�
       if (checkpoint) save(checkpoint,state);
       writeGroups(output,state,changed ? group.id : null);
     }
-    progress({ tried: state.tried, maxSeeds, accepted, total: perCase * cases.length, caseId: group.id, count: group.puzzles.length, perCase });
+    progress({ status: 'search', tried: state.tried, maxSeeds, accepted: filled, total: perCase * cases.length, caseId: group.id, count: group.puzzles.length, perCase });
   }
-  if (accepted < perCase * cases.length) throw new GenerationExhaustedError(`Seed budget exhausted (${state.tried}). Partial groups and checkpoint retained; increase --max-seeds to resume. App catalog unchanged.`);
+  if (filled < perCase * cases.length) throw new GenerationExhaustedError(`Seed budget exhausted (${state.tried}). Partial groups and checkpoint retained; increase --max-seeds to resume. App catalog unchanged.`);
   return state;
 }
 
@@ -118,7 +155,7 @@ function main() {
   const appData = fileURLToPath(new URL('../src/data',import.meta.url));
   if (output === appData || output.startsWith(appData + '/') || output.startsWith(appData + '\\') || checkpoint === resolve(appData,'puzzles.json') || checkpoint === resolve(output,'manifest.json') || generationCases().some(/** 斷點不能覆蓋分組檔案。 */ group => checkpoint === resolve(output,`${group.id}.json`))) throw new Error('Output/checkpoint must not overwrite app data or group files');
   console.log(`Output: ${output}\nCheckpoint: ${checkpoint}`);
-  buildGroups({ perCase: options['per-case'], seed: options.seed, maxSeeds: options['max-seeds'], attempts: options.attempts, output, checkpoint }, /** 每個種子回報目前組別及總進度。 */ p => console.log(`${p.caseId}: ${p.count}/${p.perCase}; total ${p.accepted}/${p.total}; seeds ${p.tried}/${p.maxSeeds}`));
+  buildGroups({ perCase: options['per-case'], seed: options.seed, maxSeeds: options['max-seeds'], attempts: options.attempts, output, checkpoint }, /** 每個種子回報目前組別及總進度。 */ p => console.log(`${p.status === 'skip' ? 'SKIP' : p.status === 'resume' ? 'RESUME' : 'SEARCH'} ${p.caseId}: ${p.count}/${p.perCase}; total ${p.accepted}/${p.total}; seeds ${p.tried}/${p.maxSeeds}`));
   console.log(`Saved 8 complete groups, ${options['per-case']} puzzles each (${options['per-case'] * 8} total). App catalog unchanged.`);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

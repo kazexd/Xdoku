@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildGroups, generationCases, validateGroupPuzzle } from '../tools/build-puzzles.mjs';
@@ -31,7 +32,7 @@ test('partial grouped output resumes deterministically and never alters the app 
     const other=join(dir,'other.json');assert.throws(/** 對照未中斷的兩次種子搜尋。 */ ()=>buildGroups({...options,checkpoint:other,output:undefined,maxSeeds:2}),GenerationExhaustedError);
     assert.deepEqual(resumed,JSON.parse(readFileSync(other,'utf8')));
     manifest=JSON.parse(readFileSync(join(output,'manifest.json'),'utf8'));assert.equal(manifest.groups[1].count,1);
-    assert.throws(/** 更改每組目標不得混用斷點。 */ ()=>buildGroups({...options,perCase:2,maxSeeds:3}));
+    assert.throws(/** 更改起始種子不得混用斷點。 */ ()=>buildGroups({...options,seed:2,maxSeeds:3}));
     const corrupt=structuredClone(resumed);corrupt.groups[1].puzzles[0]=corrupt.groups[0].puzzles[0];writeFileSync(checkpoint,JSON.stringify(corrupt));assert.throws(/** 拒絕錯組或重複斷點。 */ ()=>buildGroups({...options,maxSeeds:3}));
     assert.equal(readFileSync(app,'utf8'),before);
   } finally { rmSync(dir,{recursive:true,force:true}); }
@@ -50,5 +51,48 @@ test('default quota is four hundred per group, never four hundred total', /** �
     assert.throws(/** 只用一個種子檢查預設配置。 */ ()=>buildGroups({seed:1,attempts:1,maxSeeds:1,checkpoint}),GenerationExhaustedError);
     const state=JSON.parse(readFileSync(checkpoint,'utf8'));
     assert.equal(state.config.perCase,400);assert.equal(state.groups.length*state.config.perCase,3200);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
+
+test('finished groups are skipped and output files recover a missing checkpoint', /** 完成組不再搜尋，從分組與索引恢復題目及種子位置。 */ () => {
+  const dir=mkdtempSync(join(tmpdir(),'xdoku-resume-output-')), output=join(dir,'output'), checkpoint=join(dir,'checkpoint.json');
+  try {
+    const options={perCase:1,seed:1,attempts:500,maxSeeds:2,checkpoint,output};
+    assert.throws(/** 先產生兩個完成組。 */ ()=>buildGroups(options),GenerationExhaustedError);
+    const before=JSON.parse(readFileSync(checkpoint,'utf8')), path=join(output,'7x7-no-singleton.json'), original=readFileSync(path,'utf8');
+    rmSync(checkpoint);
+    const events=[];
+    assert.throws(/** 從第 3 個種子續跑，不重算前兩組。 */ ()=>buildGroups({...options,maxSeeds:3},/** 記錄實際排程。 */ event=>events.push(event)),GenerationExhaustedError);
+    const restored=JSON.parse(readFileSync(checkpoint,'utf8'));
+    assert.equal(restored.tried,3);
+    assert.deepEqual(restored.groups[0].puzzles,before.groups[0].puzzles);assert.deepEqual(restored.groups[1].puzzles,before.groups[1].puzzles);
+    assert.equal(readFileSync(path,'utf8'),original);
+    assert.deepEqual(events.filter(/** 收集被跳過的組。 */ e=>e.status==='skip').map(/** 讀取組別名稱。 */ e=>e.caseId),['7x7-no-singleton','7x7-one-singleton']);
+    assert.ok(events.filter(/** 只檢查實際搜尋。 */ e=>e.status==='search').every(/** 不可搜尋已完成組。 */ e=>e.caseId!=='7x7-no-singleton'&&e.caseId!=='7x7-one-singleton'));
+    // 模擬斷點落後於已輸出的第二組，應補回結果而非覆蓋成空白。
+    writeFileSync(checkpoint,JSON.stringify({...before,tried:1,cursor:1,groups:before.groups.map(/** 保留只有第一組的舊斷點。 */ (g,i)=>i===1?{...g,puzzles:[]}:g)}));
+    assert.throws(/** 讀取較新的輸出結果。 */ ()=>buildGroups({...options,maxSeeds:3}),GenerationExhaustedError);
+    assert.deepEqual(JSON.parse(readFileSync(checkpoint,'utf8')).groups[1].puzzles,before.groups[1].puzzles);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('raising quotas resumes existing groups and lowering quotas never truncates results', /** 更改目標數量仍保留原題目及全域去重。 */ () => {
+  const dir=mkdtempSync(join(tmpdir(),'xdoku-quota-change-')), output=join(dir,'output'), checkpoint=join(dir,'checkpoint.json');
+  try {
+    const options={perCase:1,seed:1,attempts:500,maxSeeds:2,checkpoint,output};
+    assert.throws(/** 建立可重用成果。 */ ()=>buildGroups(options),GenerationExhaustedError);
+    const before=JSON.parse(readFileSync(checkpoint,'utf8')),events=[];
+    assert.throws(/** 提高目標不必改用新斷點。 */ ()=>buildGroups({...options,perCase:2,maxSeeds:3},/** 記錄續跑狀態。 */ e=>events.push(e)),GenerationExhaustedError);
+    const raised=JSON.parse(readFileSync(checkpoint,'utf8'));assert.equal(raised.config.perCase,2);
+    assert.deepEqual(raised.groups[0].puzzles,before.groups[0].puzzles);assert.ok(events.some(/** 原來完成組現在只需補差額。 */ e=>e.caseId==='7x7-no-singleton'&&e.status==='resume'&&e.count===1));
+    const groupFile=join(output,'7x7-no-singleton.json'), exported=JSON.parse(readFileSync(groupFile,'utf8'));
+    const extra=makePuzzle(5,7),payload={size:extra.size,regions:extra.regions,solution:extra.solution,givens:extra.givens,rating:extra.rating};
+    const additional={...extra,id:`p-${createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0,24)}`};
+    exported.puzzles.push(additional);writeFileSync(groupFile,JSON.stringify(exported));
+    assert.throws(/** 降低目標仍保留超出目標的第二題。 */ ()=>buildGroups({...options,maxSeeds:4}),GenerationExhaustedError);
+    assert.deepEqual(JSON.parse(readFileSync(checkpoint,'utf8')).groups[0].puzzles,[...before.groups[0].puzzles,additional]);
+    const groupPath=join(output,'7x7-no-singleton.json'),valid=readFileSync(groupPath,'utf8'),bad=JSON.parse(valid);bad.puzzles[0].regions.fill(0);writeFileSync(groupPath,JSON.stringify(bad));
+    assert.throws(/** 錯誤檔案必須報錯而非重新生成覆蓋。 */ ()=>buildGroups({...options,maxSeeds:5}));assert.equal(readFileSync(groupPath,'utf8'),JSON.stringify(bad));
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
